@@ -1,6 +1,10 @@
 /**
  * Wayfinder SDK client wrapper
  * Provides a configured instance of the Wayfinder Core SDK
+ *
+ * Supports split gateway configuration:
+ * - Routing: Can use any gateway (network, trusted-peers, static) since data is verified
+ * - Verification: Uses only trusted gateways (top-staked or static) for hash verification
  */
 
 import {
@@ -16,14 +20,19 @@ import {
 } from '@ar.io/wayfinder-core';
 
 import type { RouterConfig, Logger, RoutingStrategy } from '../types/index.js';
-import { TopStakedGatewaysProvider } from './top-staked-gateways.js';
+import { NetworkGatewayManager } from './network-gateway-manager.js';
 
 export interface WayfinderServices {
-  gatewaysProvider: GatewaysProvider;
+  /** Provider for routing gateways (where to fetch data) */
+  routingGatewaysProvider: GatewaysProvider;
+  /** Provider for verification gateways (who to trust for hashes) */
+  verificationGatewaysProvider: GatewaysProvider | null;
+  /** Routing strategy instance */
   routingStrategy: SdkRoutingStrategy;
+  /** Verification strategy instance */
   verificationStrategy: SdkVerificationStrategy | null;
-  /** Top staked gateways provider (only set when using network source) */
-  topStakedProvider: TopStakedGatewaysProvider | null;
+  /** Network gateway manager (if using network sources) */
+  networkGatewayManager: NetworkGatewayManager | null;
 }
 
 /**
@@ -39,27 +48,23 @@ function createSdkLogger(logger: Logger) {
 }
 
 /**
- * Create gateways provider based on configuration
+ * Create routing gateways provider based on configuration.
+ * Routing can use any gateway since we verify the data anyway.
  */
-function createGatewaysProvider(
+function createRoutingGatewaysProvider(
   config: RouterConfig,
   logger: Logger,
-): { provider: GatewaysProvider; topStakedProvider: TopStakedGatewaysProvider | null } {
+  networkManager: NetworkGatewayManager | null,
+): GatewaysProvider {
   const sdkLogger = createSdkLogger(logger);
 
   switch (config.routing.gatewaySource) {
     case 'network': {
-      // Use top staked gateways from ar.io network registry
-      const topStakedProvider = new TopStakedGatewaysProvider({
-        poolSize: config.networkGateways.poolSize,
-        cacheTtlMs: config.networkGateways.refreshIntervalMs,
-        logger,
-        fallbackGateways: config.verification.trustedGateways.length > 0
-          ? config.verification.trustedGateways
-          : [new URL('https://arweave.net'), new URL('https://ar-io.dev')],
-      });
-
-      return { provider: topStakedProvider, topStakedProvider };
+      if (!networkManager) {
+        throw new Error('Network gateway manager required for network routing source');
+      }
+      // Use ALL gateways from network for routing (sorted by stake, but not filtered)
+      return networkManager.createRoutingProvider();
     }
 
     case 'trusted-peers': {
@@ -69,25 +74,54 @@ function createGatewaysProvider(
       });
 
       // Wrap with caching (convert ms to seconds)
-      const provider = new SimpleCacheGatewaysProvider({
+      return new SimpleCacheGatewaysProvider({
         gatewaysProvider: baseProvider,
         ttlSeconds: Math.floor(config.resilience.gatewayHealthTtlMs / 1000),
         logger: sdkLogger,
       });
-
-      return { provider, topStakedProvider: null };
     }
 
     case 'static': {
-      const provider: GatewaysProvider = {
+      return {
         getGateways: async () => config.routing.staticGateways,
       };
-
-      return { provider, topStakedProvider: null };
     }
 
     default:
-      throw new Error(`Unknown gateway source: ${config.routing.gatewaySource}`);
+      throw new Error(`Unknown routing gateway source: ${config.routing.gatewaySource}`);
+  }
+}
+
+/**
+ * Create verification gateways provider based on configuration.
+ * Verification requires trusted gateways (high stake = more skin in the game).
+ */
+function createVerificationGatewaysProvider(
+  config: RouterConfig,
+  _logger: Logger,
+  networkManager: NetworkGatewayManager | null,
+): GatewaysProvider | null {
+  if (!config.verification.enabled) {
+    return null;
+  }
+
+  switch (config.verification.gatewaySource) {
+    case 'top-staked': {
+      if (!networkManager) {
+        throw new Error('Network gateway manager required for top-staked verification source');
+      }
+      // Use top N staked gateways for verification
+      return networkManager.createVerificationProvider(config.verification.gatewayCount);
+    }
+
+    case 'static': {
+      return {
+        getGateways: async () => config.verification.staticGateways,
+      };
+    }
+
+    default:
+      throw new Error(`Unknown verification gateway source: ${config.verification.gatewaySource}`);
   }
 }
 
@@ -127,36 +161,23 @@ function createRoutingStrategy(
 }
 
 /**
- * Create verification strategy based on configuration
- *
- * When using network gateway source, the trusted gateways for verification
- * will be provided dynamically from the TopStakedGatewaysProvider.
- * Otherwise, uses the static TRUSTED_GATEWAYS config.
+ * Create verification strategy based on configuration.
+ * Uses the verification gateways provider for trusted hash verification.
  */
 function createVerificationStrategy(
   config: RouterConfig,
-  topStakedProvider: TopStakedGatewaysProvider | null,
+  verificationProvider: GatewaysProvider | null,
   logger: Logger,
 ): SdkVerificationStrategy | null {
-  if (!config.verification.enabled) {
+  if (!config.verification.enabled || !verificationProvider) {
     return null;
   }
 
   const sdkLogger = createSdkLogger(logger);
 
-  // When using network source, use the same top-staked gateways for verification
-  if (config.routing.gatewaySource === 'network' && topStakedProvider) {
-    // Create a dynamic verification strategy that uses top staked gateways
-    return new DynamicHashVerificationStrategy({
-      gatewaysProvider: topStakedProvider,
-      maxConcurrency: 2,
-      logger: sdkLogger,
-    });
-  }
-
-  // Use static trusted gateways from config
-  return new HashVerificationStrategy({
-    trustedGateways: config.verification.trustedGateways,
+  // Use dynamic verification strategy that fetches gateways from provider
+  return new DynamicHashVerificationStrategy({
+    gatewaysProvider: verificationProvider,
     maxConcurrency: 2,
     logger: sdkLogger,
   });
@@ -215,38 +236,80 @@ class DynamicHashVerificationStrategy implements SdkVerificationStrategy {
 }
 
 /**
- * Initialize Wayfinder SDK services
+ * Check if network gateway manager is needed based on configuration.
+ */
+function needsNetworkManager(config: RouterConfig): boolean {
+  return (
+    config.routing.gatewaySource === 'network' ||
+    config.verification.gatewaySource === 'top-staked'
+  );
+}
+
+/**
+ * Create network gateway manager if needed.
+ * Call initialize() on the returned manager before using.
+ */
+export function createNetworkManager(
+  config: RouterConfig,
+  logger: Logger,
+): NetworkGatewayManager | null {
+  if (!needsNetworkManager(config)) {
+    return null;
+  }
+
+  return new NetworkGatewayManager({
+    refreshIntervalMs: config.networkGateways.refreshIntervalMs,
+    minGateways: config.networkGateways.minGateways,
+    fallbackGateways: config.networkGateways.fallbackGateways,
+    logger,
+  });
+}
+
+/**
+ * Initialize Wayfinder SDK services.
+ * The networkManager must be initialized before calling this function.
  */
 export function createWayfinderServices(
   config: RouterConfig,
   logger: Logger,
+  networkManager: NetworkGatewayManager | null,
 ): WayfinderServices {
-  const { provider: gatewaysProvider, topStakedProvider } = createGatewaysProvider(config, logger);
+  // Create routing gateways provider
+  const routingGatewaysProvider = createRoutingGatewaysProvider(config, logger, networkManager);
 
+  // Create verification gateways provider (separate from routing)
+  const verificationGatewaysProvider = createVerificationGatewaysProvider(config, logger, networkManager);
+
+  // Create routing strategy
   const routingStrategy = createRoutingStrategy(
     config.routing.strategy,
-    gatewaysProvider,
+    routingGatewaysProvider,
     logger,
   );
 
-  const verificationStrategy = createVerificationStrategy(config, topStakedProvider, logger);
+  // Create verification strategy
+  const verificationStrategy = createVerificationStrategy(
+    config,
+    verificationGatewaysProvider,
+    logger,
+  );
 
   logger.info('Wayfinder services initialized', {
-    gatewaySource: config.routing.gatewaySource,
+    routingGatewaySource: config.routing.gatewaySource,
+    verificationGatewaySource: config.verification.gatewaySource,
     routingStrategy: config.routing.strategy,
     verificationEnabled: config.verification.enabled,
-    networkPoolSize: config.routing.gatewaySource === 'network'
-      ? config.networkGateways.poolSize
-      : undefined,
-    staticTrustedGateways: config.routing.gatewaySource !== 'network'
-      ? config.verification.trustedGateways.map((g) => g.toString())
-      : undefined,
+    verificationGatewayCount: config.verification.gatewaySource === 'top-staked'
+      ? config.verification.gatewayCount
+      : config.verification.staticGateways.length,
+    usesNetworkManager: networkManager !== null,
   });
 
   return {
-    gatewaysProvider,
+    routingGatewaysProvider,
+    verificationGatewaysProvider,
     routingStrategy,
     verificationStrategy,
-    topStakedProvider,
+    networkGatewayManager: networkManager,
   };
 }

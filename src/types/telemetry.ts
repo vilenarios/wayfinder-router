@@ -33,6 +33,7 @@ export interface GatewayRequestEvent {
   verification?: {
     outcome: VerificationOutcome;
     durationMs?: number;
+    contentTxId?: string; // The actual content txId (may differ from identifier for manifests)
   };
 
   // Consensus (ArNS resolution)

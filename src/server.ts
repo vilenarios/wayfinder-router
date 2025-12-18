@@ -13,7 +13,12 @@ import { createModeSelectorMiddleware } from './middleware/mode-selector.js';
 import { createRateLimitMiddleware } from './middleware/rate-limiter.js';
 import { createErrorResponse } from './middleware/error-handler.js';
 
-import { createWayfinderServices, type WayfinderServices } from './services/wayfinder-client.js';
+import {
+  createWayfinderServices,
+  createNetworkManager,
+  type WayfinderServices,
+} from './services/wayfinder-client.js';
+import type { NetworkGatewayManager } from './services/network-gateway-manager.js';
 import { createArnsResolver, type ArnsResolver } from './services/arns-resolver.js';
 import {
   createGatewaySelector,
@@ -21,6 +26,10 @@ import {
 } from './services/gateway-selector.js';
 import { createVerifier, type Verifier } from './services/verifier.js';
 import { createContentFetcher, type ContentFetcher } from './services/content-fetcher.js';
+import {
+  createManifestResolver,
+  type ManifestResolver,
+} from './services/manifest-resolver.js';
 
 import { createProxyHandler } from './handlers/proxy.js';
 import { createRouteHandler } from './handlers/route.js';
@@ -51,9 +60,11 @@ export interface RouterServices {
   gatewaySelector: GatewaySelector;
   verifier: Verifier;
   contentFetcher: ContentFetcher;
+  manifestResolver: ManifestResolver;
   telemetryService: TelemetryService | null;
   contentCache: ContentCache;
   wayfinderServices: WayfinderServices;
+  networkGatewayManager: NetworkGatewayManager | null;
 }
 
 export interface CreateServerOptions {
@@ -68,15 +79,23 @@ export function createServer(options: CreateServerOptions) {
   const { config, logger } = options;
   const startTime = Date.now();
 
-  // Initialize Wayfinder SDK services
-  const wayfinderServices = createWayfinderServices(config, logger);
+  // Create network gateway manager if needed (for network/top-staked sources)
+  const networkGatewayManager = createNetworkManager(config, logger);
+
+  // Initialize Wayfinder SDK services (network manager must be initialized later)
+  const wayfinderServices = createWayfinderServices(config, logger, networkGatewayManager);
 
   // Initialize application services
-  const arnsResolver = createArnsResolver(config, logger);
+  // ArNS resolver uses verification gateways for consensus
+  const arnsResolver = createArnsResolver(
+    config,
+    logger,
+    wayfinderServices.verificationGatewaysProvider,
+  );
 
   const gatewaySelector = createGatewaySelector(
     wayfinderServices.routingStrategy,
-    wayfinderServices.gatewaysProvider,
+    wayfinderServices.routingGatewaysProvider,
     config,
     logger,
   );
@@ -88,6 +107,9 @@ export function createServer(options: CreateServerOptions) {
   );
 
   const contentFetcher = createContentFetcher(gatewaySelector, config, logger);
+
+  // Initialize manifest resolver for verifying path manifests
+  const manifestResolver = createManifestResolver(config, verifier, logger);
 
   // Initialize verified content cache
   const contentCache = new ContentCache({
@@ -121,9 +143,11 @@ export function createServer(options: CreateServerOptions) {
     gatewaySelector,
     verifier,
     contentFetcher,
+    manifestResolver,
     telemetryService,
     contentCache,
     wayfinderServices,
+    networkGatewayManager,
   };
 
   // Create Hono app
@@ -241,6 +265,7 @@ export function createServer(options: CreateServerOptions) {
           arnsResolver,
           contentFetcher,
           verifier,
+          manifestResolver,
           config,
           logger,
           telemetryService,

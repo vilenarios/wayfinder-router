@@ -3,6 +3,7 @@
  * Resolves ArNS names to transaction IDs with multi-gateway consensus
  */
 
+import type { GatewaysProvider } from '@ar.io/wayfinder-core';
 import type { Logger, ArnsResolution, RouterConfig } from '../types/index.js';
 import { ArnsCache } from '../cache/arns-cache.js';
 import {
@@ -12,7 +13,10 @@ import {
 import { extractArnsInfo } from '../utils/headers.js';
 
 export interface ArnsResolverOptions {
-  trustedGateways: URL[];
+  /** Provider for trusted verification gateways */
+  gatewaysProvider: GatewaysProvider;
+  /** Static fallback gateways (used if provider returns empty) */
+  fallbackGateways: URL[];
   consensusThreshold: number;
   cacheTtlMs: number;
   logger: Logger;
@@ -27,23 +31,39 @@ interface GatewayResolution {
 }
 
 export class ArnsResolver {
-  private trustedGateways: URL[];
+  private gatewaysProvider: GatewaysProvider;
+  private fallbackGateways: URL[];
   private consensusThreshold: number;
   private cache: ArnsCache;
   private logger: Logger;
 
   constructor(options: ArnsResolverOptions) {
-    this.trustedGateways = options.trustedGateways;
-    this.consensusThreshold = Math.min(
-      options.consensusThreshold,
-      options.trustedGateways.length,
-    );
+    this.gatewaysProvider = options.gatewaysProvider;
+    this.fallbackGateways = options.fallbackGateways;
+    this.consensusThreshold = options.consensusThreshold;
     this.logger = options.logger;
 
     this.cache = new ArnsCache({
       defaultTtlMs: options.cacheTtlMs,
       logger: options.logger,
     });
+  }
+
+  /**
+   * Get trusted gateways from provider or fallback
+   */
+  private async getTrustedGateways(): Promise<URL[]> {
+    try {
+      const gateways = await this.gatewaysProvider.getGateways();
+      if (gateways.length > 0) {
+        return gateways;
+      }
+    } catch (error) {
+      this.logger.warn('Failed to get gateways from provider, using fallback', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return this.fallbackGateways;
   }
 
   /**
@@ -78,12 +98,15 @@ export class ArnsResolver {
    * Query all trusted gateways for ArNS resolution
    */
   private async queryGateways(arnsName: string): Promise<GatewayResolution[]> {
+    // Get trusted gateways from provider
+    const trustedGateways = await this.getTrustedGateways();
+
     this.logger.debug('Querying gateways for ArNS resolution', {
       arnsName,
-      gateways: this.trustedGateways.map((g) => g.toString()),
+      gateways: trustedGateways.map((g) => g.toString()),
     });
 
-    const promises = this.trustedGateways.map(async (gateway) => {
+    const promises = trustedGateways.map(async (gateway) => {
       try {
         return await this.queryGateway(gateway, arnsName);
       } catch (error) {
@@ -240,13 +263,25 @@ export class ArnsResolver {
 
 /**
  * Create ArNS resolver from router configuration
+ * @param config Router configuration
+ * @param logger Logger instance
+ * @param verificationProvider Provider for verification gateways
  */
 export function createArnsResolver(
   config: RouterConfig,
   logger: Logger,
+  verificationProvider: GatewaysProvider | null,
 ): ArnsResolver {
+  // Create a provider that uses the verification provider or static gateways
+  const gatewaysProvider: GatewaysProvider = verificationProvider || {
+    getGateways: async () => config.verification.staticGateways,
+  };
+
   return new ArnsResolver({
-    trustedGateways: config.verification.trustedGateways,
+    gatewaysProvider,
+    fallbackGateways: config.verification.staticGateways.length > 0
+      ? config.verification.staticGateways
+      : config.networkGateways.fallbackGateways,
     consensusThreshold: config.verification.consensusThreshold,
     cacheTtlMs: config.cache.arnsTtlMs,
     logger,

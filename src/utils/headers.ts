@@ -142,3 +142,82 @@ export function extractArnsInfo(headers: Headers): {
 export function extractDigest(headers: Headers): string | null {
   return headers.get('x-ar-io-digest');
 }
+
+/**
+ * Extract the actual data txId from gateway headers
+ * This is the txId of the content being returned (may differ from requested txId for manifests)
+ */
+export function extractDataId(headers: Headers): string | null {
+  return headers.get('x-ar-io-data-id');
+}
+
+/**
+ * Extract manifest-related information from gateway headers
+ */
+export interface ManifestHeaderInfo {
+  /** The txId that was resolved (ArNS or manifest txId) - only present for ArNS requests */
+  resolvedId: string | null;
+  /** The actual data txId being served (content txId) */
+  dataId: string | null;
+}
+
+export function extractManifestInfo(headers: Headers): ManifestHeaderInfo {
+  const resolvedId = headers.get('x-arns-resolved-id');
+  const dataId = headers.get('x-ar-io-data-id');
+
+  return {
+    resolvedId,
+    dataId,
+  };
+}
+
+/**
+ * Determine if a response is from a manifest
+ * Works for both ArNS and txId requests:
+ * - For ArNS: manifest if resolvedId !== dataId
+ * - For txId: manifest if dataId exists and differs from requested txId
+ */
+export function isManifestResponse(
+  manifestInfo: ManifestHeaderInfo,
+  requestedTxId: string,
+): boolean {
+  const { resolvedId, dataId } = manifestInfo;
+
+  // If we have both resolvedId and dataId (ArNS request), compare them
+  if (resolvedId && dataId) {
+    return resolvedId !== dataId;
+  }
+
+  // For txId requests, check if dataId differs from the requested txId
+  if (dataId && dataId !== requestedTxId) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Get all verification-related headers as a record
+ * Used when passing headers to verification functions
+ */
+export function extractVerificationHeaders(headers: Headers): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  const verificationHeaders = [
+    'x-ar-io-digest',
+    'x-ar-io-data-id',
+    'x-arns-resolved-id',
+    'x-ar-io-verified',
+    'content-length',
+    'content-type',
+  ];
+
+  for (const name of verificationHeaders) {
+    const value = headers.get(name);
+    if (value) {
+      result[name] = value;
+    }
+  }
+
+  return result;
+}

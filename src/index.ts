@@ -82,10 +82,10 @@ async function main() {
   // Create server
   const { app, services } = createServer({ config, logger });
 
-  // Initialize top staked gateways provider if using network source
-  if (services.wayfinderServices.topStakedProvider) {
-    logger.info('Initializing top staked gateways from ar.io network...');
-    await services.wayfinderServices.topStakedProvider.initialize();
+  // Initialize network gateway manager if using network/top-staked sources
+  if (services.networkGatewayManager) {
+    logger.info('Initializing network gateway manager from ar.io network...');
+    await services.networkGatewayManager.initialize();
   }
 
   // Start server
@@ -103,10 +103,10 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info('Shutdown signal received', { signal });
 
-    // Stop top staked gateways provider
-    if (services.wayfinderServices.topStakedProvider) {
-      logger.info('Stopping top staked gateways provider');
-      services.wayfinderServices.topStakedProvider.stop();
+    // Stop network gateway manager
+    if (services.networkGatewayManager) {
+      logger.info('Stopping network gateway manager');
+      services.networkGatewayManager.stop();
     }
 
     // Stop telemetry service to flush pending events and close database

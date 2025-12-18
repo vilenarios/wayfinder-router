@@ -30,8 +30,11 @@ export type RouterMode = 'proxy' | 'route';
 // Routing strategies
 export type RoutingStrategy = 'fastest' | 'random' | 'round-robin';
 
-// Gateway sources
-export type GatewaySource = 'network' | 'trusted-peers' | 'static';
+// Gateway sources for ROUTING (where to fetch data - trust not required)
+export type RoutingGatewaySource = 'network' | 'trusted-peers' | 'static';
+
+// Gateway sources for VERIFICATION (who to ask for hashes - trust required)
+export type VerificationGatewaySource = 'top-staked' | 'static';
 
 // Configuration
 export interface RouterConfig {
@@ -46,25 +49,42 @@ export interface RouterConfig {
     allowOverride: boolean;
   };
 
+  // Verification settings - determines how we verify data integrity
   verification: {
     enabled: boolean;
-    trustedGateways: URL[];
+    // Where to get trusted gateways for hash verification
+    gatewaySource: VerificationGatewaySource;
+    // Number of top staked gateways to use (when source is 'top-staked')
+    gatewayCount: number;
+    // Static trusted gateways (fallback or when source is 'static')
+    staticGateways: URL[];
+    // ArNS consensus threshold
     consensusThreshold: number;
   };
 
+  // Routing settings - determines where we fetch data from
   routing: {
+    // How to select a gateway from the pool
     strategy: RoutingStrategy;
-    gatewaySource: GatewaySource;
+    // Where to get the list of gateways for routing
+    gatewaySource: RoutingGatewaySource;
+    // Gateway to query for trusted peers (when source is 'trusted-peers')
     trustedPeerGateway: URL;
+    // Static gateways (when source is 'static')
     staticGateways: URL[];
+    // Retry settings
     retryAttempts: number;
     retryDelayMs: number;
   };
 
-  // Network gateway settings (when gatewaySource is 'network')
+  // Network gateway settings (shared by routing and verification when using network sources)
   networkGateways: {
-    poolSize: number; // Number of top staked gateways to use
-    refreshIntervalMs: number; // How often to refresh the gateway list
+    // How often to refresh gateway lists from the network
+    refreshIntervalMs: number;
+    // Minimum gateways required to operate (fail-safe)
+    minGateways: number;
+    // Fallback gateways if network fetch fails
+    fallbackGateways: URL[];
   };
 
   resilience: {
@@ -160,3 +180,12 @@ export interface Logger {
 
 // Re-export telemetry types
 export type { TelemetryConfig } from './telemetry.js';
+
+// Re-export manifest types
+export type {
+  ArweaveManifest,
+  ManifestPathEntry,
+  VerifiedManifest,
+  ManifestPathResolution,
+} from './manifest.js';
+export { isArweaveManifest, normalizeManifestPath } from './manifest.js';

@@ -6,7 +6,8 @@ import type {
   RouterConfig,
   RouterMode,
   RoutingStrategy,
-  GatewaySource,
+  RoutingGatewaySource,
+  VerificationGatewaySource,
 } from './types/index.js';
 
 function getEnv(key: string, defaultValue: string): string {
@@ -50,17 +51,28 @@ function parseUrls(value: string): URL[] {
 }
 
 export function loadConfig(): RouterConfig {
-  const trustedGatewaysStr = getEnv(
-    'TRUSTED_GATEWAYS',
+  // Verification gateways (static, used when VERIFICATION_GATEWAY_SOURCE=static)
+  const verificationStaticGatewaysStr = getEnv(
+    'VERIFICATION_STATIC_GATEWAYS',
     'https://arweave.net,https://ar-io.dev',
   );
-  const staticGatewaysStr = getEnv(
-    'STATIC_GATEWAYS',
+
+  // Routing gateways (static, used when ROUTING_GATEWAY_SOURCE=static)
+  const routingStaticGatewaysStr = getEnv(
+    'ROUTING_STATIC_GATEWAYS',
     'https://arweave.net,https://ar-io.dev',
   );
+
+  // Trusted peer gateway (used when ROUTING_GATEWAY_SOURCE=trusted-peers)
   const trustedPeerGatewayStr = getEnv(
     'TRUSTED_PEER_GATEWAY',
     'https://arweave.net',
+  );
+
+  // Fallback gateways (used when network fetch fails)
+  const fallbackGatewaysStr = getEnv(
+    'NETWORK_FALLBACK_GATEWAYS',
+    'https://arweave.net,https://ar-io.dev',
   );
 
   return {
@@ -75,24 +87,42 @@ export function loadConfig(): RouterConfig {
       allowOverride: getEnvBool('ALLOW_MODE_OVERRIDE', true),
     },
 
+    // Verification settings - determines how we verify data integrity
     verification: {
       enabled: getEnvBool('VERIFICATION_ENABLED', true),
-      trustedGateways: parseUrls(trustedGatewaysStr),
+      // Where to get trusted gateways for hash verification
+      gatewaySource: getEnv('VERIFICATION_GATEWAY_SOURCE', 'top-staked') as VerificationGatewaySource,
+      // Number of top staked gateways to use (when source is 'top-staked')
+      gatewayCount: getEnvInt('VERIFICATION_GATEWAY_COUNT', 3),
+      // Static trusted gateways (fallback or when source is 'static')
+      staticGateways: parseUrls(verificationStaticGatewaysStr),
+      // ArNS consensus threshold
       consensusThreshold: getEnvInt('ARNS_CONSENSUS_THRESHOLD', 2),
     },
 
+    // Routing settings - determines where we fetch data from
     routing: {
+      // How to select a gateway from the pool
       strategy: getEnv('ROUTING_STRATEGY', 'fastest') as RoutingStrategy,
-      gatewaySource: getEnv('GATEWAY_SOURCE', 'network') as GatewaySource,
+      // Where to get the list of gateways for routing
+      gatewaySource: getEnv('ROUTING_GATEWAY_SOURCE', 'network') as RoutingGatewaySource,
+      // Gateway to query for trusted peers (when source is 'trusted-peers')
       trustedPeerGateway: new URL(trustedPeerGatewayStr),
-      staticGateways: parseUrls(staticGatewaysStr),
+      // Static gateways (when source is 'static')
+      staticGateways: parseUrls(routingStaticGatewaysStr),
+      // Retry settings
       retryAttempts: getEnvInt('RETRY_ATTEMPTS', 3),
       retryDelayMs: getEnvInt('RETRY_DELAY_MS', 100),
     },
 
+    // Network gateway settings (shared by routing and verification when using network sources)
     networkGateways: {
-      poolSize: getEnvInt('NETWORK_GATEWAY_POOL_SIZE', 10),
+      // How often to refresh gateway lists from the network
       refreshIntervalMs: getEnvInt('NETWORK_GATEWAY_REFRESH_MS', 24 * 60 * 60 * 1000), // 24 hours
+      // Minimum gateways required to operate (fail-safe)
+      minGateways: getEnvInt('NETWORK_MIN_GATEWAYS', 3),
+      // Fallback gateways if network fetch fails
+      fallbackGateways: parseUrls(fallbackGatewaysStr),
     },
 
     resilience: {
@@ -148,37 +178,52 @@ export function loadConfig(): RouterConfig {
 }
 
 export function validateConfig(config: RouterConfig): void {
-  // Validate trusted gateways (only required if NOT using network source for verification)
+  // === VERIFICATION VALIDATION ===
+
+  // Validate verification gateway source
+  const validVerificationSources: VerificationGatewaySource[] = ['top-staked', 'static'];
+  if (!validVerificationSources.includes(config.verification.gatewaySource)) {
+    throw new Error(
+      `Invalid VERIFICATION_GATEWAY_SOURCE: ${config.verification.gatewaySource}. Must be one of: ${validVerificationSources.join(', ')}`,
+    );
+  }
+
+  // Validate static gateways required when verification source is 'static'
   if (
     config.verification.enabled &&
-    config.routing.gatewaySource !== 'network' &&
-    config.verification.trustedGateways.length === 0
+    config.verification.gatewaySource === 'static' &&
+    config.verification.staticGateways.length === 0
   ) {
     throw new Error(
-      'VERIFICATION_ENABLED is true but no TRUSTED_GATEWAYS configured. ' +
-      'Either set TRUSTED_GATEWAYS or use GATEWAY_SOURCE=network to fetch from ar.io registry.',
+      'VERIFICATION_ENABLED is true with VERIFICATION_GATEWAY_SOURCE=static but no VERIFICATION_STATIC_GATEWAYS configured.',
     );
   }
 
-  // Validate consensus threshold (only when using static trusted gateways)
-  if (
-    config.routing.gatewaySource !== 'network' &&
-    config.verification.consensusThreshold >
-    config.verification.trustedGateways.length
-  ) {
-    throw new Error(
-      `ARNS_CONSENSUS_THRESHOLD (${config.verification.consensusThreshold}) cannot be greater than number of TRUSTED_GATEWAYS (${config.verification.trustedGateways.length})`,
-    );
-  }
-
-  // Validate network gateway pool size
-  if (config.routing.gatewaySource === 'network') {
-    if (config.networkGateways.poolSize < 1 || config.networkGateways.poolSize > 100) {
+  // Validate gateway count for top-staked verification
+  if (config.verification.gatewaySource === 'top-staked') {
+    if (config.verification.gatewayCount < 1 || config.verification.gatewayCount > 50) {
       throw new Error(
-        `NETWORK_GATEWAY_POOL_SIZE must be between 1 and 100, got ${config.networkGateways.poolSize}`,
+        `VERIFICATION_GATEWAY_COUNT must be between 1 and 50, got ${config.verification.gatewayCount}`,
       );
     }
   }
+
+  // Validate consensus threshold against gateway count
+  if (config.verification.gatewaySource === 'top-staked') {
+    if (config.verification.consensusThreshold > config.verification.gatewayCount) {
+      throw new Error(
+        `ARNS_CONSENSUS_THRESHOLD (${config.verification.consensusThreshold}) cannot be greater than VERIFICATION_GATEWAY_COUNT (${config.verification.gatewayCount})`,
+      );
+    }
+  } else if (config.verification.gatewaySource === 'static') {
+    if (config.verification.consensusThreshold > config.verification.staticGateways.length) {
+      throw new Error(
+        `ARNS_CONSENSUS_THRESHOLD (${config.verification.consensusThreshold}) cannot be greater than number of VERIFICATION_STATIC_GATEWAYS (${config.verification.staticGateways.length})`,
+      );
+    }
+  }
+
+  // === ROUTING VALIDATION ===
 
   // Validate routing strategy
   const validStrategies = ['fastest', 'random', 'round-robin'];
@@ -188,21 +233,48 @@ export function validateConfig(config: RouterConfig): void {
     );
   }
 
-  // Validate gateway source
-  const validSources = ['network', 'trusted-peers', 'static'];
-  if (!validSources.includes(config.routing.gatewaySource)) {
+  // Validate routing gateway source
+  const validRoutingSources: RoutingGatewaySource[] = ['network', 'trusted-peers', 'static'];
+  if (!validRoutingSources.includes(config.routing.gatewaySource)) {
     throw new Error(
-      `Invalid GATEWAY_SOURCE: ${config.routing.gatewaySource}. Must be one of: ${validSources.join(', ')}`,
+      `Invalid ROUTING_GATEWAY_SOURCE: ${config.routing.gatewaySource}. Must be one of: ${validRoutingSources.join(', ')}`,
     );
   }
 
-  // Validate static gateways if using static source
+  // Validate static gateways required when routing source is 'static'
   if (
     config.routing.gatewaySource === 'static' &&
     config.routing.staticGateways.length === 0
   ) {
     throw new Error(
-      'GATEWAY_SOURCE is static but no STATIC_GATEWAYS configured',
+      'ROUTING_GATEWAY_SOURCE is static but no ROUTING_STATIC_GATEWAYS configured',
     );
+  }
+
+  // === NETWORK GATEWAY VALIDATION ===
+
+  // Validate network settings when using network sources
+  const usesNetwork =
+    config.routing.gatewaySource === 'network' ||
+    config.verification.gatewaySource === 'top-staked';
+
+  if (usesNetwork) {
+    if (config.networkGateways.minGateways < 1) {
+      throw new Error(
+        `NETWORK_MIN_GATEWAYS must be at least 1, got ${config.networkGateways.minGateways}`,
+      );
+    }
+
+    if (config.networkGateways.refreshIntervalMs < 60_000) {
+      throw new Error(
+        `NETWORK_GATEWAY_REFRESH_MS must be at least 60000 (1 minute), got ${config.networkGateways.refreshIntervalMs}`,
+      );
+    }
+
+    if (config.networkGateways.fallbackGateways.length === 0) {
+      throw new Error(
+        'Using network gateway source but no NETWORK_FALLBACK_GATEWAYS configured for failover',
+      );
+    }
   }
 }
