@@ -2,14 +2,16 @@
  * URL utilities for Wayfinder Router
  */
 
-import { createHash } from "node:crypto";
-
 // Transaction ID regex - exactly 43 base64url characters
 const TX_ID_REGEX = /^[A-Za-z0-9_-]{43}$/;
 
 // ArNS name regex - 1-51 characters, lowercase alphanumeric with hyphens/underscores
 // Note: ArNS names are case-insensitive, we normalize to lowercase
 const ARNS_NAME_REGEX = /^[a-z0-9_-]{1,51}$/i;
+
+// Sandbox subdomain regex - exactly 52 lowercase base32 characters
+// Base32 uses A-Z and 2-7, but ar.io uses lowercase
+const SANDBOX_REGEX = /^[a-z2-7]{52}$/;
 
 /**
  * Check if a string is a valid Arweave transaction ID
@@ -30,14 +32,50 @@ export function isArnsName(value: string): boolean {
 }
 
 /**
+ * Check if a subdomain is a valid sandbox subdomain
+ * Sandbox subdomains are 52 lowercase base32 characters derived from a txId
+ */
+export function isValidSandbox(subdomain: string): boolean {
+  return SANDBOX_REGEX.test(subdomain);
+}
+
+/**
+ * Validate that a sandbox subdomain is correctly derived from a transaction ID
+ * Returns true if the sandbox matches what would be generated from the txId
+ */
+export function validateSandboxForTxId(sandbox: string, txId: string): boolean {
+  if (!isValidSandbox(sandbox) || !isTxId(txId)) {
+    return false;
+  }
+  const expectedSandbox = sandboxFromTxId(txId);
+  return sandbox === expectedSandbox;
+}
+
+/**
+ * Decode base64url string to bytes
+ */
+function fromBase64Url(base64url: string): Uint8Array {
+  // Convert base64url to standard base64
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  // Add padding if needed
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  // Decode
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Generate sandbox subdomain from transaction ID
- * This creates a unique subdomain for each transaction
+ * ar.io gateways use base32 encoding of the base64url-decoded txId
  */
 export function sandboxFromTxId(txId: string): string {
-  // Use base32 encoding of first 32 bytes of SHA-256 hash
-  // This matches the ar.io gateway sandbox format
-  const hash = createHash("sha256").update(txId).digest();
-  return base32Encode(hash.subarray(0, 20)).toLowerCase();
+  // Decode the base64url txId to raw bytes, then base32 encode
+  const bytes = fromBase64Url(txId);
+  return base32Encode(bytes).toLowerCase();
 }
 
 /**
@@ -86,10 +124,11 @@ export function constructGatewayUrl(params: {
 
   if (useSubdomain) {
     // Use sandbox subdomain for transaction isolation
+    // The txId must still be in the path to fetch the actual content
     const sandbox = sandboxFromTxId(txId);
     const url = new URL(gateway);
     url.hostname = `${sandbox}.${url.hostname}`;
-    url.pathname = path || "/";
+    url.pathname = `/${txId}${path}`;
     return url;
   }
 

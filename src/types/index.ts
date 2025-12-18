@@ -15,6 +15,8 @@ export interface TxIdRequestInfo {
   type: "txid";
   txId: string;
   path: string;
+  /** Sandbox subdomain if request came via sandbox URL */
+  sandboxSubdomain?: string;
 }
 
 export interface ReservedRequestInfo {
@@ -160,14 +162,19 @@ export interface VerificationResult {
   expectedHash?: string;
   durationMs: number;
   error?: string;
+  /** URLs of gateways that provided verification hashes */
+  verifiedByGateways?: string[];
 }
 
 // Proxy response metadata
 export interface ProxyMetadata {
   mode: RouterMode;
   verified: boolean;
-  gateway: string;
   txId: string;
+  /** Gateway URL that served the data */
+  routedVia: string;
+  /** Gateway URLs that provided verification hashes */
+  verifiedBy?: string[];
   verificationTimeMs?: number;
   cached?: boolean;
 }

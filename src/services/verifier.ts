@@ -7,7 +7,10 @@
  */
 
 import { createHash } from "node:crypto";
-import type { VerificationStrategy as SdkVerificationStrategy } from "@ar.io/wayfinder-core";
+import type {
+  VerificationStrategy as SdkVerificationStrategy,
+  GatewaysProvider,
+} from "@ar.io/wayfinder-core";
 import type {
   Logger,
   RouterConfig,
@@ -17,6 +20,8 @@ import { VerificationError } from "../middleware/error-handler.js";
 
 export interface VerifierOptions {
   verificationStrategy: SdkVerificationStrategy | null;
+  /** Provider for verification gateways (to track which gateways verified) */
+  verificationProvider: GatewaysProvider | null;
   logger: Logger;
 }
 
@@ -27,10 +32,12 @@ export interface StreamingVerificationResult {
 
 export class Verifier {
   private strategy: SdkVerificationStrategy | null;
+  private verificationProvider: GatewaysProvider | null;
   private logger: Logger;
 
   constructor(options: VerifierOptions) {
     this.strategy = options.verificationStrategy;
+    this.verificationProvider = options.verificationProvider;
     this.logger = options.logger;
   }
 
@@ -39,6 +46,21 @@ export class Verifier {
    */
   get enabled(): boolean {
     return this.strategy !== null;
+  }
+
+  /**
+   * Get the URLs of gateways used for verification
+   */
+  private async getVerificationGatewayUrls(): Promise<string[]> {
+    if (!this.verificationProvider) {
+      return [];
+    }
+    try {
+      const gateways = await this.verificationProvider.getGateways();
+      return gateways.map((g) => g.toString());
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -81,11 +103,15 @@ export class Verifier {
       // Compute hash for logging/caching purposes
       const hash = this.computeHash(data);
 
+      // Get the gateways that were used for verification
+      const verifiedByGateways = await this.getVerificationGatewayUrls();
+
       this.logger.debug("Verification succeeded", {
         txId,
         durationMs,
         dataSize: data.length,
         hash,
+        verifiedByGateways,
       });
 
       return {
@@ -93,6 +119,7 @@ export class Verifier {
         txId,
         durationMs,
         hash,
+        verifiedByGateways,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -151,6 +178,8 @@ export class Verifier {
     const logger = this.logger;
     const strategy = this.strategy!;
     const computeHash = this.computeHash.bind(this);
+    const getVerificationGatewayUrls =
+      this.getVerificationGatewayUrls.bind(this);
 
     let resolveVerification: (result: VerificationResult) => void;
     let rejectVerification: (error: Error) => void;
@@ -207,11 +236,15 @@ export class Verifier {
           // Compute hash for logging/caching purposes
           const hash = computeHash(fullData);
 
+          // Get the gateways that were used for verification
+          const verifiedByGateways = await getVerificationGatewayUrls();
+
           logger.debug("Verification succeeded", {
             txId,
             durationMs,
             dataSize: totalSize,
             hash,
+            verifiedByGateways,
           });
 
           // Verification passed - stream the data
@@ -223,6 +256,7 @@ export class Verifier {
             txId,
             durationMs,
             hash,
+            verifiedByGateways,
           });
         } catch (error) {
           const durationMs = Date.now() - startTime;
@@ -262,11 +296,13 @@ export class Verifier {
  */
 export function createVerifier(
   verificationStrategy: SdkVerificationStrategy | null,
+  verificationProvider: GatewaysProvider | null,
   _config: RouterConfig,
   logger: Logger,
 ): Verifier {
   return new Verifier({
     verificationStrategy,
+    verificationProvider,
     logger,
   });
 }

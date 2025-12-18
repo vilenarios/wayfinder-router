@@ -261,6 +261,12 @@ export class ContentCache {
   toResponse(cached: CachedContent): Response {
     const headers = new Headers(cached.headers);
 
+    // IMPORTANT: Remove content-encoding since cached data is decompressed
+    // (Node.js fetch() auto-decompresses, so we store decompressed data)
+    headers.delete("content-encoding");
+    // Ensure content-length matches actual data size
+    headers.set("content-length", String(cached.data.length));
+
     // Add cache indicators
     headers.set("x-wayfinder-cached", "true");
     headers.set("x-wayfinder-verified", "true");

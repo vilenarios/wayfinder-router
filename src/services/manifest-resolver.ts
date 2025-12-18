@@ -1,8 +1,13 @@
 /**
  * Manifest Resolver Service
  * Handles fetching, verifying, parsing, and resolving Arweave manifests
+ *
+ * NOTE: Manifests require special verification handling. The SDK's HashVerificationStrategy
+ * fetches expected hashes from /{txId} which returns index content for manifests, not
+ * the raw manifest JSON. We implement custom verification using /raw/{txId} endpoints.
  */
 
+import { createHash } from "node:crypto";
 import type { GatewaysProvider } from "@ar.io/wayfinder-core";
 import type { Logger, RouterConfig } from "../types/index.js";
 import type {
@@ -255,6 +260,10 @@ export class ManifestResolver {
 
   /**
    * Fetch raw manifest from trusted gateways and verify
+   *
+   * NOTE: We use custom verification instead of the SDK's HashVerificationStrategy
+   * because the SDK fetches hashes from /{txId} which returns index content for
+   * manifests, not the raw manifest JSON. We fetch from /raw/{txId} instead.
    */
   private async fetchAndVerifyManifest(
     manifestTxId: string,
@@ -276,11 +285,15 @@ export class ManifestResolver {
       try {
         const result = await this.fetchRawManifest(gateway, manifestTxId);
 
-        // Verify the manifest
-        const verificationResult = await this.verifier.verify(
+        // Custom verification for manifests using /raw/ endpoint
+        // The SDK's HashVerificationStrategy doesn't work for manifests because
+        // it fetches from /{txId} which returns the index content hash, not manifest hash
+        const verificationResult = await this.verifyManifestHash(
           result.data,
           manifestTxId,
           result.headers,
+          gateway,
+          trustedGateways,
         );
 
         if (!verificationResult.verified) {
@@ -298,6 +311,7 @@ export class ManifestResolver {
           gateway: gateway.toString(),
           pathCount: Object.keys(manifest.paths).length,
           hasIndex: !!manifest.index,
+          verifiedBy: verificationResult.verifiedBy,
         });
 
         return {
@@ -322,6 +336,126 @@ export class ManifestResolver {
       manifestTxId,
       `Failed to fetch manifest from any trusted gateway: ${lastError?.message || "unknown error"}`,
     );
+  }
+
+  /**
+   * Verify manifest hash using /raw/ endpoint
+   *
+   * 1. Check if x-ar-io-digest header is present from source gateway
+   * 2. If not, fetch hash from other trusted gateways via /raw/ endpoint
+   * 3. Compute SHA-256 hash of received data
+   * 4. Compare and verify
+   */
+  private async verifyManifestHash(
+    data: Uint8Array,
+    manifestTxId: string,
+    headers: Record<string, string>,
+    sourceGateway: URL,
+    trustedGateways: URL[],
+  ): Promise<{ verified: boolean; error?: string; verifiedBy?: string }> {
+    // Compute hash of the manifest data
+    const computedHash = createHash("sha256").update(data).digest("base64url");
+
+    // Check if source gateway provided the digest
+    const sourceDigest = headers["x-ar-io-digest"];
+    if (sourceDigest) {
+      if (computedHash === sourceDigest) {
+        this.logger.debug("Manifest verified using source gateway digest", {
+          manifestTxId,
+          gateway: sourceGateway.toString(),
+          hash: computedHash,
+        });
+        return { verified: true, verifiedBy: sourceGateway.toString() };
+      }
+      // Hash mismatch with source gateway
+      return {
+        verified: false,
+        error: `Hash mismatch: computed ${computedHash}, source gateway returned ${sourceDigest}`,
+      };
+    }
+
+    // Source gateway didn't provide digest, fetch from other trusted gateways
+    this.logger.debug(
+      "Source gateway missing x-ar-io-digest, fetching from other gateways",
+      {
+        manifestTxId,
+        sourceGateway: sourceGateway.toString(),
+      },
+    );
+
+    // Try other gateways to get the expected hash
+    for (const gateway of trustedGateways) {
+      // Skip the source gateway we already tried
+      if (gateway.toString() === sourceGateway.toString()) {
+        continue;
+      }
+
+      try {
+        const expectedHash = await this.fetchRawDigest(gateway, manifestTxId);
+        if (expectedHash) {
+          if (computedHash === expectedHash) {
+            this.logger.debug("Manifest verified using trusted gateway digest", {
+              manifestTxId,
+              verifyGateway: gateway.toString(),
+              hash: computedHash,
+            });
+            return { verified: true, verifiedBy: gateway.toString() };
+          }
+          // Hash mismatch
+          return {
+            verified: false,
+            error: `Hash mismatch: computed ${computedHash}, trusted gateway returned ${expectedHash}`,
+          };
+        }
+      } catch (error) {
+        this.logger.debug("Failed to fetch digest from gateway", {
+          manifestTxId,
+          gateway: gateway.toString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // No gateway returned a digest - fall back to SDK verification if enabled
+    if (this.verifier.enabled) {
+      this.logger.debug(
+        "No gateway provided x-ar-io-digest, falling back to SDK verification",
+        { manifestTxId },
+      );
+      const sdkResult = await this.verifier.verify(data, manifestTxId, headers);
+      return {
+        verified: sdkResult.verified,
+        error: sdkResult.error,
+        verifiedBy: sdkResult.verifiedByGateways?.join(", "),
+      };
+    }
+
+    return {
+      verified: false,
+      error: "No trusted gateway provided x-ar-io-digest for verification",
+    };
+  }
+
+  /**
+   * Fetch the x-ar-io-digest header from a gateway's /raw/ endpoint
+   */
+  private async fetchRawDigest(
+    gateway: URL,
+    txId: string,
+  ): Promise<string | null> {
+    const url = new URL(gateway);
+    url.pathname = `/raw/${txId}`;
+
+    const response = await fetch(url.toString(), {
+      method: "HEAD",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return response.headers.get("x-ar-io-digest");
   }
 
   /**

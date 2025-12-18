@@ -6,17 +6,11 @@ import type { ProxyMetadata } from "../types/index.js";
 
 // Headers to strip from gateway responses (security)
 const STRIPPED_HEADERS = new Set([
-  "x-ar-io-digest",
-  "x-ar-io-verified",
-  "x-ar-io-data-item-offset",
-  "x-ar-io-data-item-data-offset",
-  "x-ar-io-data-item-size",
-  "x-ar-io-root-transaction-id",
   "set-cookie",
   "x-powered-by",
 ]);
 
-// Headers to pass through from gateway response
+// Standard HTTP headers to pass through from gateway response
 const PASSTHROUGH_HEADERS = new Set([
   "content-type",
   "content-length",
@@ -26,9 +20,6 @@ const PASSTHROUGH_HEADERS = new Set([
   "etag",
   "last-modified",
   "accept-ranges",
-  "x-arns-resolved-id",
-  "x-arns-ttl-seconds",
-  "x-arns-name",
 ]);
 
 /**
@@ -72,6 +63,9 @@ export function createGatewayRequestHeaders(params: {
 
 /**
  * Filter and transform headers from gateway response
+ * Passes through:
+ * - Standard HTTP headers (content-type, cache-control, etc.)
+ * - All ar.io gateway headers (x-ar-io-*, x-arns-*) except those explicitly stripped
  */
 export function filterGatewayResponseHeaders(gatewayHeaders: Headers): Headers {
   const headers = new Headers();
@@ -79,13 +73,19 @@ export function filterGatewayResponseHeaders(gatewayHeaders: Headers): Headers {
   gatewayHeaders.forEach((value, name) => {
     const lowerName = name.toLowerCase();
 
-    // Skip stripped headers
+    // Skip explicitly stripped headers (security/internal)
     if (STRIPPED_HEADERS.has(lowerName)) {
       return;
     }
 
-    // Include passthrough headers
+    // Include standard passthrough headers
     if (PASSTHROUGH_HEADERS.has(lowerName)) {
+      headers.set(name, value);
+      return;
+    }
+
+    // Include all ar.io gateway headers (x-ar-io-* and x-arns-*)
+    if (lowerName.startsWith("x-ar-io-") || lowerName.startsWith("x-arns-")) {
       headers.set(name, value);
     }
   });
@@ -102,8 +102,12 @@ export function addWayfinderHeaders(
 ): void {
   headers.set("x-wayfinder-mode", metadata.mode);
   headers.set("x-wayfinder-verified", String(metadata.verified));
-  headers.set("x-wayfinder-gateway", metadata.gateway);
+  headers.set("x-wayfinder-routed-via", metadata.routedVia);
   headers.set("x-wayfinder-txid", metadata.txId);
+
+  if (metadata.verifiedBy && metadata.verifiedBy.length > 0) {
+    headers.set("x-wayfinder-verified-by", metadata.verifiedBy.join(", "));
+  }
 
   if (metadata.verificationTimeMs !== undefined) {
     headers.set(

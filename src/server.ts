@@ -120,6 +120,7 @@ export function createServer(options: CreateServerOptions) {
 
   const verifier = createVerifier(
     wayfinderServices.verificationStrategy,
+    wayfinderServices.verificationGatewaysProvider,
     config,
     logger,
   );

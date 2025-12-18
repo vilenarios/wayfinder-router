@@ -4,7 +4,12 @@
  */
 
 import type { Context } from "hono";
-import type { Logger, RouterConfig, RequestInfo } from "../types/index.js";
+import type {
+  Logger,
+  RouterConfig,
+  RequestInfo,
+  TxIdRequestInfo,
+} from "../types/index.js";
 import type { ArnsResolver } from "../services/arns-resolver.js";
 import type { GatewaySelector } from "../services/gateway-selector.js";
 import type { TelemetryService } from "../telemetry/service.js";
@@ -12,6 +17,7 @@ import {
   constructGatewayUrl,
   constructArnsGatewayUrl,
   sandboxFromTxId,
+  validateSandboxForTxId,
 } from "../utils/url.js";
 
 export interface RouteHandlerDeps {
@@ -120,17 +126,53 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
    */
   async function handleTxIdRoute(
     c: Context,
-    requestInfo: { type: "txid"; txId: string; path: string },
+    requestInfo: TxIdRequestInfo,
     traceId: string,
   ): Promise<Response> {
-    const { txId, path } = requestInfo;
+    const { txId, path, sandboxSubdomain } = requestInfo;
     const startTime = Date.now();
 
     logger.info("Processing txId route request", {
       txId,
       path,
+      sandboxSubdomain,
       traceId,
     });
+
+    // Check if we need to redirect to sandbox subdomain first
+    if (!sandboxSubdomain) {
+      // No sandbox subdomain - redirect to router with sandbox
+      const sandbox = sandboxFromTxId(txId);
+      const { config } = deps;
+      const protocol = c.req.url.startsWith("https") ? "https" : "http";
+      const redirectUrl = `${protocol}://${sandbox}.${config.server.baseDomain}/${txId}${path}`;
+
+      logger.info("Redirecting to sandbox subdomain", {
+        txId,
+        sandbox,
+        redirectUrl,
+        traceId,
+      });
+
+      return c.redirect(redirectUrl, 302);
+    }
+
+    // Validate sandbox matches txId (security check)
+    if (!validateSandboxForTxId(sandboxSubdomain, txId)) {
+      logger.warn("Sandbox subdomain mismatch", {
+        txId,
+        sandboxSubdomain,
+        expectedSandbox: sandboxFromTxId(txId),
+        traceId,
+      });
+      return c.json(
+        {
+          error: "Bad Request",
+          message: "Sandbox subdomain does not match transaction ID",
+        },
+        400,
+      );
+    }
 
     // Select a gateway
     const gateway = await gatewaySelector.selectForTransaction(txId, path);

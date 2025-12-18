@@ -13,7 +13,12 @@
  */
 
 import type { Context } from "hono";
-import type { Logger, RouterConfig, RequestInfo } from "../types/index.js";
+import type {
+  Logger,
+  RouterConfig,
+  RequestInfo,
+  TxIdRequestInfo,
+} from "../types/index.js";
 import type { ArnsResolver } from "../services/arns-resolver.js";
 import type { ContentFetcher } from "../services/content-fetcher.js";
 import type { Verifier } from "../services/verifier.js";
@@ -29,6 +34,10 @@ import {
   extractManifestInfo,
   isManifestResponse,
 } from "../utils/headers.js";
+import {
+  sandboxFromTxId,
+  validateSandboxForTxId,
+} from "../utils/url.js";
 
 export interface ProxyHandlerDeps {
   arnsResolver: ArnsResolver;
@@ -136,7 +145,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     addWayfinderHeaders(headers, {
       mode: "proxy",
       verified: false,
-      gateway: gateway.toString(),
+      routedVia: gateway.toString(),
       txId,
     });
 
@@ -174,17 +183,53 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
    */
   async function handleTxIdRequest(
     c: Context,
-    requestInfo: { type: "txid"; txId: string; path: string },
+    requestInfo: TxIdRequestInfo,
     traceId: string,
   ): Promise<Response> {
-    const { txId, path } = requestInfo;
+    const { txId, path, sandboxSubdomain } = requestInfo;
     const startTime = Date.now();
 
     logger.info("Processing txId proxy request", {
       txId,
       path,
+      sandboxSubdomain,
       traceId,
     });
+
+    // Check if we need to redirect to sandbox subdomain
+    if (!sandboxSubdomain) {
+      // No sandbox subdomain - redirect to sandboxed URL
+      const sandbox = sandboxFromTxId(txId);
+      const { config } = deps;
+      const protocol = c.req.url.startsWith("https") ? "https" : "http";
+      const redirectUrl = `${protocol}://${sandbox}.${config.server.baseDomain}/${txId}${path}`;
+
+      logger.info("Redirecting to sandbox subdomain", {
+        txId,
+        sandbox,
+        redirectUrl,
+        traceId,
+      });
+
+      return c.redirect(redirectUrl, 302);
+    }
+
+    // Validate sandbox matches txId (security check)
+    if (!validateSandboxForTxId(sandboxSubdomain, txId)) {
+      logger.warn("Sandbox subdomain mismatch", {
+        txId,
+        sandboxSubdomain,
+        expectedSandbox: sandboxFromTxId(txId),
+        traceId,
+      });
+      return c.json(
+        {
+          error: "Bad Request",
+          message: "Sandbox subdomain does not match transaction ID",
+        },
+        400,
+      );
+    }
 
     // Note: Cache check happens AFTER manifest resolution in handleVerifiedResponse
     // because we need to know the actual content txId (which may differ for manifests)
@@ -219,7 +264,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     addWayfinderHeaders(headers, {
       mode: "proxy",
       verified: false,
-      gateway: gateway.toString(),
+      routedVia: gateway.toString(),
       txId,
     });
 
@@ -449,11 +494,19 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         offset += chunk.length;
       }
 
+      // IMPORTANT: Remove content-encoding header since Node.js fetch() auto-decompresses
+      // If we pass through content-encoding: gzip but serve decompressed data,
+      // browsers will fail with ERR_CONTENT_DECODING_FAILED
+      headers.delete("content-encoding");
+      // Update content-length to match actual decompressed size
+      headers.set("content-length", String(totalLength));
+
       // Add wayfinder headers - include manifest info if applicable
       addWayfinderHeaders(headers, {
         mode: "proxy",
         verified: true,
-        gateway: gateway.toString(),
+        routedVia: gateway.toString(),
+        verifiedBy: verificationResult.verifiedByGateways,
         txId: contentTxId,
         verificationTimeMs: verificationResult.durationMs,
       });
