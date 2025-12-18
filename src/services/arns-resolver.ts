@@ -3,14 +3,14 @@
  * Resolves ArNS names to transaction IDs with multi-gateway consensus
  */
 
-import type { GatewaysProvider } from '@ar.io/wayfinder-core';
-import type { Logger, ArnsResolution, RouterConfig } from '../types/index.js';
-import { ArnsCache } from '../cache/arns-cache.js';
+import type { GatewaysProvider } from "@ar.io/wayfinder-core";
+import type { Logger, ArnsResolution, RouterConfig } from "../types/index.js";
+import { ArnsCache } from "../cache/arns-cache.js";
 import {
   ArnsResolutionError,
   ArnsConsensusMismatchError,
-} from '../middleware/error-handler.js';
-import { extractArnsInfo } from '../utils/headers.js';
+} from "../middleware/error-handler.js";
+import { extractArnsInfo } from "../utils/headers.js";
 
 export interface ArnsResolverOptions {
   /** Provider for trusted verification gateways */
@@ -59,7 +59,7 @@ export class ArnsResolver {
         return gateways;
       }
     } catch (error) {
-      this.logger.warn('Failed to get gateways from provider, using fallback', {
+      this.logger.warn("Failed to get gateways from provider, using fallback", {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -75,7 +75,7 @@ export class ArnsResolver {
     // Check cache first
     const cached = this.cache.get(normalized);
     if (cached) {
-      this.logger.debug('ArNS resolved from cache', {
+      this.logger.debug("ArNS resolved from cache", {
         arnsName: normalized,
         txId: cached.txId,
       });
@@ -101,7 +101,7 @@ export class ArnsResolver {
     // Get trusted gateways from provider
     const trustedGateways = await this.getTrustedGateways();
 
-    this.logger.debug('Querying gateways for ArNS resolution', {
+    this.logger.debug("Querying gateways for ArNS resolution", {
       arnsName,
       gateways: trustedGateways.map((g) => g.toString()),
     });
@@ -110,7 +110,7 @@ export class ArnsResolver {
       try {
         return await this.queryGateway(gateway, arnsName);
       } catch (error) {
-        this.logger.warn('Gateway ArNS query failed', {
+        this.logger.warn("Gateway ArNS query failed", {
           gateway: gateway.toString(),
           arnsName,
           error: error instanceof Error ? error.message : String(error),
@@ -139,15 +139,15 @@ export class ArnsResolver {
     const url = new URL(gateway);
     url.hostname = `${arnsName}.${url.hostname}`;
 
-    this.logger.debug('Querying gateway for ArNS', {
+    this.logger.debug("Querying gateway for ArNS", {
       url: url.toString(),
       arnsName,
     });
 
     const response = await fetch(url.toString(), {
-      method: 'HEAD',
+      method: "HEAD",
       signal: AbortSignal.timeout(5000),
-      redirect: 'follow',
+      redirect: "follow",
     });
 
     if (!response.ok) {
@@ -157,7 +157,7 @@ export class ArnsResolver {
     const { txId, ttlSeconds, processId } = extractArnsInfo(response.headers);
 
     if (!txId) {
-      throw new Error('Gateway did not return x-arns-resolved-id header');
+      throw new Error("Gateway did not return x-arns-resolved-id header");
     }
 
     return {
@@ -180,7 +180,7 @@ export class ArnsResolver {
       (r) => r.txId !== null && !r.error,
     ) as Array<GatewayResolution & { txId: string }>;
 
-    this.logger.debug('ArNS resolution results', {
+    this.logger.debug("ArNS resolution results", {
       arnsName,
       total: resolutions.length,
       successful: successful.length,
@@ -200,7 +200,7 @@ export class ArnsResolver {
 
     if (txIds.size > 1) {
       // Consensus mismatch - security concern
-      this.logger.error('ArNS consensus mismatch detected', {
+      this.logger.error("ArNS consensus mismatch detected", {
         arnsName,
         resolutions: successful.map((r) => ({
           gateway: r.gateway,
@@ -229,7 +229,7 @@ export class ArnsResolver {
       processId: successful.find((r) => r.processId)?.processId ?? undefined,
     };
 
-    this.logger.info('ArNS resolved with consensus', {
+    this.logger.info("ArNS resolved with consensus", {
       arnsName,
       txId,
       consensusCount: successful.length,
@@ -279,9 +279,10 @@ export function createArnsResolver(
 
   return new ArnsResolver({
     gatewaysProvider,
-    fallbackGateways: config.verification.staticGateways.length > 0
-      ? config.verification.staticGateways
-      : config.networkGateways.fallbackGateways,
+    fallbackGateways:
+      config.verification.staticGateways.length > 0
+        ? config.verification.staticGateways
+        : config.networkGateways.fallbackGateways,
     consensusThreshold: config.verification.consensusThreshold,
     cacheTtlMs: config.cache.arnsTtlMs,
     logger,

@@ -6,8 +6,8 @@
  * we can safely cache it indefinitely. The LRU eviction ensures memory stays bounded.
  */
 
-import { LRUCache } from 'lru-cache';
-import type { Logger } from '../types/index.js';
+import { LRUCache } from "lru-cache";
+import type { Logger } from "../types/index.js";
 
 export interface CachedContent {
   data: Uint8Array;
@@ -60,7 +60,7 @@ export class ContentCache {
       max: maxEntries,
       dispose: (value) => {
         this.currentSizeBytes -= value.data.length;
-        this.logger?.debug('Cache entry evicted', {
+        this.logger?.debug("Cache entry evicted", {
           txId: value.txId,
           size: value.data.length,
         });
@@ -77,11 +77,11 @@ export class ContentCache {
 
     this.cache = new LRUCache<string, CachedContent>(cacheOptions);
 
-    this.logger?.info('Content cache initialized', {
+    this.logger?.info("Content cache initialized", {
       enabled,
       maxSizeBytes,
       maxEntries,
-      ttlMs: ttlMs || 'infinite (immutable mode)',
+      ttlMs: ttlMs || "infinite (immutable mode)",
       maxItemSizeBytes,
     });
   }
@@ -103,7 +103,7 @@ export class ContentCache {
   /**
    * Get cached content
    */
-  get(txId: string, path: string = '/'): CachedContent | null {
+  get(txId: string, path: string = "/"): CachedContent | null {
     if (!this.enabled) return null;
 
     const key = this.createKey(txId, path);
@@ -112,7 +112,7 @@ export class ContentCache {
     if (cached) {
       this.hits++;
       cached.accessCount++;
-      this.logger?.debug('Content cache hit', {
+      this.logger?.debug("Content cache hit", {
         txId,
         path,
         size: cached.contentLength,
@@ -122,21 +122,25 @@ export class ContentCache {
     }
 
     this.misses++;
-    this.logger?.debug('Content cache miss', { txId, path });
+    this.logger?.debug("Content cache miss", { txId, path });
     return null;
   }
 
   /**
    * Cache verified content
    */
-  set(txId: string, path: string, content: Omit<CachedContent, 'accessCount'>): boolean {
+  set(
+    txId: string,
+    path: string,
+    content: Omit<CachedContent, "accessCount">,
+  ): boolean {
     if (!this.enabled) return false;
 
     const contentSize = content.data.length;
 
     // Skip if single item exceeds max item size
     if (contentSize > this.maxItemSizeBytes) {
-      this.logger?.debug('Content too large to cache (exceeds max item size)', {
+      this.logger?.debug("Content too large to cache (exceeds max item size)", {
         txId,
         path,
         size: contentSize,
@@ -147,12 +151,15 @@ export class ContentCache {
 
     // Skip if single item exceeds total cache size
     if (contentSize > this.maxSizeBytes) {
-      this.logger?.debug('Content too large to cache (exceeds total cache size)', {
-        txId,
-        path,
-        size: contentSize,
-        maxSize: this.maxSizeBytes,
-      });
+      this.logger?.debug(
+        "Content too large to cache (exceeds total cache size)",
+        {
+          txId,
+          path,
+          size: contentSize,
+          maxSize: this.maxSizeBytes,
+        },
+      );
       return false;
     }
 
@@ -176,7 +183,7 @@ export class ContentCache {
     this.cache.set(key, fullContent);
     this.currentSizeBytes += contentSize;
 
-    this.logger?.info('Verified content cached', {
+    this.logger?.info("Verified content cached", {
       txId,
       path,
       size: contentSize,
@@ -190,7 +197,7 @@ export class ContentCache {
   /**
    * Check if content is cached
    */
-  has(txId: string, path: string = '/'): boolean {
+  has(txId: string, path: string = "/"): boolean {
     if (!this.enabled) return false;
     const key = this.createKey(txId, path);
     return this.cache.has(key);
@@ -219,7 +226,7 @@ export class ContentCache {
   clear(): void {
     this.cache.clear();
     this.currentSizeBytes = 0;
-    this.logger?.info('Content cache cleared');
+    this.logger?.info("Content cache cleared");
   }
 
   /**
@@ -255,13 +262,16 @@ export class ContentCache {
     const headers = new Headers(cached.headers);
 
     // Add cache indicators
-    headers.set('x-wayfinder-cached', 'true');
-    headers.set('x-wayfinder-verified', 'true');
-    headers.set('x-wayfinder-cache-age', String(Date.now() - cached.verifiedAt));
+    headers.set("x-wayfinder-cached", "true");
+    headers.set("x-wayfinder-verified", "true");
+    headers.set(
+      "x-wayfinder-cache-age",
+      String(Date.now() - cached.verifiedAt),
+    );
 
     // Since content is verified and immutable, allow strong caching
-    if (!headers.has('cache-control')) {
-      headers.set('cache-control', 'public, max-age=31536000, immutable');
+    if (!headers.has("cache-control")) {
+      headers.set("cache-control", "public, max-age=31536000, immutable");
     }
 
     return new Response(cached.data, {
@@ -277,31 +287,39 @@ export class ContentCache {
     const stats = this.stats();
     const lines: string[] = [];
 
-    lines.push('# HELP wayfinder_content_cache_entries Number of cached content entries');
-    lines.push('# TYPE wayfinder_content_cache_entries gauge');
+    lines.push(
+      "# HELP wayfinder_content_cache_entries Number of cached content entries",
+    );
+    lines.push("# TYPE wayfinder_content_cache_entries gauge");
     lines.push(`wayfinder_content_cache_entries ${stats.entries}`);
-    lines.push('');
+    lines.push("");
 
-    lines.push('# HELP wayfinder_content_cache_size_bytes Current cache size in bytes');
-    lines.push('# TYPE wayfinder_content_cache_size_bytes gauge');
+    lines.push(
+      "# HELP wayfinder_content_cache_size_bytes Current cache size in bytes",
+    );
+    lines.push("# TYPE wayfinder_content_cache_size_bytes gauge");
     lines.push(`wayfinder_content_cache_size_bytes ${stats.sizeBytes}`);
-    lines.push('');
+    lines.push("");
 
-    lines.push('# HELP wayfinder_content_cache_max_bytes Maximum cache size in bytes');
-    lines.push('# TYPE wayfinder_content_cache_max_bytes gauge');
+    lines.push(
+      "# HELP wayfinder_content_cache_max_bytes Maximum cache size in bytes",
+    );
+    lines.push("# TYPE wayfinder_content_cache_max_bytes gauge");
     lines.push(`wayfinder_content_cache_max_bytes ${stats.maxSizeBytes}`);
-    lines.push('');
+    lines.push("");
 
-    lines.push('# HELP wayfinder_content_cache_hits_total Total cache hits');
-    lines.push('# TYPE wayfinder_content_cache_hits_total counter');
+    lines.push("# HELP wayfinder_content_cache_hits_total Total cache hits");
+    lines.push("# TYPE wayfinder_content_cache_hits_total counter");
     lines.push(`wayfinder_content_cache_hits_total ${stats.hits}`);
-    lines.push('');
+    lines.push("");
 
-    lines.push('# HELP wayfinder_content_cache_misses_total Total cache misses');
-    lines.push('# TYPE wayfinder_content_cache_misses_total counter');
+    lines.push(
+      "# HELP wayfinder_content_cache_misses_total Total cache misses",
+    );
+    lines.push("# TYPE wayfinder_content_cache_misses_total counter");
     lines.push(`wayfinder_content_cache_misses_total ${stats.misses}`);
-    lines.push('');
+    lines.push("");
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 }

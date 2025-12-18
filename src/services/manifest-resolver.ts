@@ -3,19 +3,23 @@
  * Handles fetching, verifying, parsing, and resolving Arweave manifests
  */
 
-import type { Logger, RouterConfig } from '../types/index.js';
+import type { GatewaysProvider } from "@ar.io/wayfinder-core";
+import type { Logger, RouterConfig } from "../types/index.js";
 import type {
   ArweaveManifest,
   VerifiedManifest,
   ManifestPathResolution,
-} from '../types/manifest.js';
-import {
-  isArweaveManifest,
-  normalizeManifestPath,
-} from '../types/manifest.js';
-import type { Verifier } from './verifier.js';
-import { ManifestCache } from '../cache/manifest-cache.js';
-import { WayfinderError } from '../middleware/error-handler.js';
+} from "../types/manifest.js";
+import { isArweaveManifest, normalizeManifestPath } from "../types/manifest.js";
+import type { Verifier } from "./verifier.js";
+import { ManifestCache } from "../cache/manifest-cache.js";
+import { WayfinderError } from "../middleware/error-handler.js";
+
+/** Valid Arweave transaction ID pattern (43 chars, base64url) */
+const TXID_REGEX = /^[a-zA-Z0-9_-]{43}$/;
+
+/** Maximum manifest size (10MB) */
+const MAX_MANIFEST_SIZE = 10 * 1024 * 1024;
 
 /**
  * Error thrown when manifest operations fail
@@ -24,8 +28,8 @@ export class ManifestError extends WayfinderError {
   public readonly manifestTxId: string;
 
   constructor(manifestTxId: string, message: string, statusCode: number = 502) {
-    super(message, statusCode, 'MANIFEST_ERROR');
-    this.name = 'ManifestError';
+    super(message, statusCode, "MANIFEST_ERROR");
+    this.name = "ManifestError";
     this.manifestTxId = manifestTxId;
   }
 }
@@ -41,16 +45,19 @@ export class ManifestPathNotFoundError extends WayfinderError {
     super(
       `Path "${path}" not found in manifest ${manifestTxId}`,
       404,
-      'MANIFEST_PATH_NOT_FOUND',
+      "MANIFEST_PATH_NOT_FOUND",
     );
-    this.name = 'ManifestPathNotFoundError';
+    this.name = "ManifestPathNotFoundError";
     this.manifestTxId = manifestTxId;
     this.path = path;
   }
 }
 
 export interface ManifestResolverOptions {
-  trustedGateways: URL[];
+  /** Provider for trusted verification gateways */
+  gatewaysProvider: GatewaysProvider;
+  /** Static fallback gateways (used if provider returns empty) */
+  fallbackGateways: URL[];
   verifier: Verifier;
   cache: ManifestCache;
   logger: Logger;
@@ -58,46 +65,97 @@ export interface ManifestResolverOptions {
 }
 
 export class ManifestResolver {
-  private trustedGateways: URL[];
+  private gatewaysProvider: GatewaysProvider;
+  private fallbackGateways: URL[];
   private verifier: Verifier;
   private cache: ManifestCache;
   private logger: Logger;
   private fetchTimeoutMs: number;
 
+  /** In-flight fetch promises for deduplication */
+  private fetchPromises: Map<string, Promise<VerifiedManifest>> = new Map();
+
   constructor(options: ManifestResolverOptions) {
-    this.trustedGateways = options.trustedGateways;
+    this.gatewaysProvider = options.gatewaysProvider;
+    this.fallbackGateways = options.fallbackGateways;
     this.verifier = options.verifier;
     this.cache = options.cache;
     this.logger = options.logger;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? 30000;
 
-    this.logger.info('ManifestResolver initialized', {
-      trustedGatewayCount: this.trustedGateways.length,
+    this.logger.info("ManifestResolver initialized", {
+      hasFallbackGateways: this.fallbackGateways.length > 0,
     });
   }
 
   /**
-   * Get a verified manifest, fetching and verifying if not cached
+   * Get trusted gateways from provider or fallback
+   */
+  private async getTrustedGateways(): Promise<URL[]> {
+    try {
+      const gateways = await this.gatewaysProvider.getGateways();
+      if (gateways.length > 0) {
+        return gateways;
+      }
+    } catch (error) {
+      this.logger.warn("Failed to get gateways from provider, using fallback", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return this.fallbackGateways;
+  }
+
+  /**
+   * Validate transaction ID format
+   */
+  private validateTxId(txId: string): void {
+    if (!TXID_REGEX.test(txId)) {
+      throw new ManifestError(txId, "Invalid transaction ID format", 400);
+    }
+  }
+
+  /**
+   * Get a verified manifest, fetching and verifying if not cached.
+   * Includes deduplication of concurrent requests for the same manifest.
    */
   async getManifest(manifestTxId: string): Promise<VerifiedManifest> {
+    // Validate txId format first
+    this.validateTxId(manifestTxId);
+
     // Check cache first
     const cached = this.cache.get(manifestTxId);
     if (cached) {
-      this.logger.debug('Manifest found in cache', { manifestTxId });
+      this.logger.debug("Manifest found in cache", { manifestTxId });
       return cached;
     }
 
+    // Check if there's already an in-flight fetch for this manifest
+    const existingPromise = this.fetchPromises.get(manifestTxId);
+    if (existingPromise) {
+      this.logger.debug("Deduplicating manifest fetch", { manifestTxId });
+      return existingPromise;
+    }
+
     // Fetch and verify from trusted gateways
-    this.logger.debug('Fetching manifest from trusted gateways', {
+    this.logger.debug("Fetching manifest from trusted gateways", {
       manifestTxId,
     });
 
-    const verified = await this.fetchAndVerifyManifest(manifestTxId);
+    // Create fetch promise and store for deduplication
+    const fetchPromise = this.fetchAndVerifyManifest(manifestTxId)
+      .then((verified) => {
+        // Cache the verified manifest
+        this.cache.set(verified);
+        return verified;
+      })
+      .finally(() => {
+        // Remove from in-flight map when done
+        this.fetchPromises.delete(manifestTxId);
+      });
 
-    // Cache the verified manifest
-    this.cache.set(verified);
+    this.fetchPromises.set(manifestTxId, fetchPromise);
 
-    return verified;
+    return fetchPromise;
   }
 
   /**
@@ -113,29 +171,23 @@ export class ManifestResolver {
     // Normalize the path
     const normalizedPath = normalizeManifestPath(path);
 
-    this.logger.debug('Resolving manifest path', {
+    this.logger.debug("Resolving manifest path", {
       manifestTxId,
       originalPath: path,
       normalizedPath,
     });
 
     // Handle empty path or index
-    if (normalizedPath === '' || normalizedPath === '/') {
+    if (normalizedPath === "" || normalizedPath === "/") {
       if (!manifest.index?.path) {
-        throw new ManifestPathNotFoundError(
-          manifestTxId,
-          path || '/',
-        );
+        throw new ManifestPathNotFoundError(manifestTxId, path || "/");
       }
 
       const indexPath = normalizeManifestPath(manifest.index.path);
       const indexEntry = manifest.paths[indexPath];
 
       if (!indexEntry) {
-        throw new ManifestPathNotFoundError(
-          manifestTxId,
-          manifest.index.path,
-        );
+        throw new ManifestPathNotFoundError(manifestTxId, manifest.index.path);
       }
 
       return {
@@ -152,7 +204,7 @@ export class ManifestResolver {
 
     if (!entry) {
       // Try with and without leading slash
-      const altPath = normalizedPath.startsWith('/')
+      const altPath = normalizedPath.startsWith("/")
         ? normalizedPath.slice(1)
         : `/${normalizedPath}`;
       entry = manifest.paths[altPath];
@@ -162,7 +214,7 @@ export class ManifestResolver {
     if (!entry) {
       // Use fallback if available
       if (manifest.fallback?.id) {
-        this.logger.debug('Path not found, using manifest fallback', {
+        this.logger.debug("Path not found, using manifest fallback", {
           manifestTxId,
           path: normalizedPath,
           fallbackTxId: manifest.fallback.id,
@@ -197,7 +249,7 @@ export class ManifestResolver {
   /**
    * Get cache statistics
    */
-  stats(): ReturnType<ManifestCache['stats']> {
+  stats(): ReturnType<ManifestCache["stats"]> {
     return this.cache.stats();
   }
 
@@ -207,10 +259,20 @@ export class ManifestResolver {
   private async fetchAndVerifyManifest(
     manifestTxId: string,
   ): Promise<VerifiedManifest> {
+    // Get trusted gateways from provider
+    const trustedGateways = await this.getTrustedGateways();
+
+    if (trustedGateways.length === 0) {
+      throw new ManifestError(
+        manifestTxId,
+        "No trusted gateways available for manifest verification",
+      );
+    }
+
     let lastError: Error | undefined;
 
     // Try each trusted gateway
-    for (const gateway of this.trustedGateways) {
+    for (const gateway of trustedGateways) {
       try {
         const result = await this.fetchRawManifest(gateway, manifestTxId);
 
@@ -224,14 +286,14 @@ export class ManifestResolver {
         if (!verificationResult.verified) {
           throw new ManifestError(
             manifestTxId,
-            `Manifest verification failed: ${verificationResult.error || 'unknown error'}`,
+            `Manifest verification failed: ${verificationResult.error || "unknown error"}`,
           );
         }
 
         // Parse the manifest JSON
         const manifest = this.parseManifest(result.data, manifestTxId);
 
-        this.logger.info('Manifest fetched and verified', {
+        this.logger.info("Manifest fetched and verified", {
           manifestTxId,
           gateway: gateway.toString(),
           pathCount: Object.keys(manifest.paths).length,
@@ -247,7 +309,7 @@ export class ManifestResolver {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        this.logger.warn('Failed to fetch manifest from gateway', {
+        this.logger.warn("Failed to fetch manifest from gateway", {
           manifestTxId,
           gateway: gateway.toString(),
           error: lastError.message,
@@ -258,7 +320,7 @@ export class ManifestResolver {
     // All gateways failed
     throw new ManifestError(
       manifestTxId,
-      `Failed to fetch manifest from any trusted gateway: ${lastError?.message || 'unknown error'}`,
+      `Failed to fetch manifest from any trusted gateway: ${lastError?.message || "unknown error"}`,
     );
   }
 
@@ -273,13 +335,13 @@ export class ManifestResolver {
     const url = new URL(gateway);
     url.pathname = `/raw/${manifestTxId}`;
 
-    this.logger.debug('Fetching raw manifest', {
+    this.logger.debug("Fetching raw manifest", {
       url: url.toString(),
       manifestTxId,
     });
 
     const response = await fetch(url.toString(), {
-      method: 'GET',
+      method: "GET",
       signal: AbortSignal.timeout(this.fetchTimeoutMs),
     });
 
@@ -290,8 +352,30 @@ export class ManifestResolver {
       );
     }
 
+    // Check content-length before buffering to prevent memory exhaustion
+    const contentLength = parseInt(
+      response.headers.get("content-length") || "0",
+      10,
+    );
+    if (contentLength > MAX_MANIFEST_SIZE) {
+      throw new ManifestError(
+        manifestTxId,
+        `Manifest too large: ${contentLength} bytes (max ${MAX_MANIFEST_SIZE})`,
+        400,
+      );
+    }
+
     // Read the response body
     const data = new Uint8Array(await response.arrayBuffer());
+
+    // Double-check actual size (in case content-length was wrong or missing)
+    if (data.length > MAX_MANIFEST_SIZE) {
+      throw new ManifestError(
+        manifestTxId,
+        `Manifest too large: ${data.length} bytes (max ${MAX_MANIFEST_SIZE})`,
+        400,
+      );
+    }
 
     // Extract relevant headers for verification
     const headers: Record<string, string> = {};
@@ -315,16 +399,13 @@ export class ManifestResolver {
       const text = new TextDecoder().decode(data);
       parsed = JSON.parse(text);
     } catch {
-      throw new ManifestError(
-        manifestTxId,
-        'Failed to parse manifest JSON',
-      );
+      throw new ManifestError(manifestTxId, "Failed to parse manifest JSON");
     }
 
     if (!isArweaveManifest(parsed)) {
       throw new ManifestError(
         manifestTxId,
-        'Invalid manifest format: not a valid arweave/paths manifest',
+        "Invalid manifest format: not a valid arweave/paths manifest",
       );
     }
 
@@ -334,19 +415,33 @@ export class ManifestResolver {
 
 /**
  * Create manifest resolver from configuration
+ * @param config Router configuration
+ * @param verifier Verifier instance
+ * @param logger Logger instance
+ * @param verificationProvider Provider for verification gateways
  */
 export function createManifestResolver(
   config: RouterConfig,
   verifier: Verifier,
   logger: Logger,
+  verificationProvider: GatewaysProvider | null,
 ): ManifestResolver {
   const cache = new ManifestCache({
     maxSize: 1000, // Cache up to 1000 manifests
     logger,
   });
 
+  // Create a provider that uses the verification provider or static gateways
+  const gatewaysProvider: GatewaysProvider = verificationProvider || {
+    getGateways: async () => config.verification.staticGateways,
+  };
+
   return new ManifestResolver({
-    trustedGateways: config.verification.staticGateways,
+    gatewaysProvider,
+    fallbackGateways:
+      config.verification.staticGateways.length > 0
+        ? config.verification.staticGateways
+        : config.networkGateways.fallbackGateways,
     verifier,
     cache,
     logger,

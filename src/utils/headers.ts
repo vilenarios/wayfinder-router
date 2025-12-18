@@ -2,33 +2,33 @@
  * Header utilities for Wayfinder Router
  */
 
-import type { ProxyMetadata } from '../types/index.js';
+import type { ProxyMetadata } from "../types/index.js";
 
 // Headers to strip from gateway responses (security)
 const STRIPPED_HEADERS = new Set([
-  'x-ar-io-digest',
-  'x-ar-io-verified',
-  'x-ar-io-data-item-offset',
-  'x-ar-io-data-item-data-offset',
-  'x-ar-io-data-item-size',
-  'x-ar-io-root-transaction-id',
-  'set-cookie',
-  'x-powered-by',
+  "x-ar-io-digest",
+  "x-ar-io-verified",
+  "x-ar-io-data-item-offset",
+  "x-ar-io-data-item-data-offset",
+  "x-ar-io-data-item-size",
+  "x-ar-io-root-transaction-id",
+  "set-cookie",
+  "x-powered-by",
 ]);
 
 // Headers to pass through from gateway response
 const PASSTHROUGH_HEADERS = new Set([
-  'content-type',
-  'content-length',
-  'content-disposition',
-  'content-encoding',
-  'cache-control',
-  'etag',
-  'last-modified',
-  'accept-ranges',
-  'x-arns-resolved-id',
-  'x-arns-ttl-seconds',
-  'x-arns-name',
+  "content-type",
+  "content-length",
+  "content-disposition",
+  "content-encoding",
+  "cache-control",
+  "etag",
+  "last-modified",
+  "accept-ranges",
+  "x-arns-resolved-id",
+  "x-arns-ttl-seconds",
+  "x-arns-name",
 ]);
 
 /**
@@ -41,22 +41,22 @@ export function createGatewayRequestHeaders(params: {
   const headers = new Headers();
 
   // Add wayfinder identification
-  headers.set('x-ar-io-component', 'wayfinder-router');
+  headers.set("x-ar-io-component", "wayfinder-router");
 
   // Add trace ID if provided
   if (params.traceId) {
-    headers.set('x-ar-io-trace-id', params.traceId);
+    headers.set("x-ar-io-trace-id", params.traceId);
   }
 
   // Forward relevant headers from original request
   if (params.originalHeaders) {
     const forwardHeaders = [
-      'accept',
-      'accept-encoding',
-      'accept-language',
-      'range',
-      'if-none-match',
-      'if-modified-since',
+      "accept",
+      "accept-encoding",
+      "accept-language",
+      "range",
+      "if-none-match",
+      "if-modified-since",
     ];
 
     for (const name of forwardHeaders) {
@@ -73,9 +73,7 @@ export function createGatewayRequestHeaders(params: {
 /**
  * Filter and transform headers from gateway response
  */
-export function filterGatewayResponseHeaders(
-  gatewayHeaders: Headers,
-): Headers {
+export function filterGatewayResponseHeaders(gatewayHeaders: Headers): Headers {
   const headers = new Headers();
 
   gatewayHeaders.forEach((value, name) => {
@@ -102,20 +100,20 @@ export function addWayfinderHeaders(
   headers: Headers,
   metadata: ProxyMetadata,
 ): void {
-  headers.set('x-wayfinder-mode', metadata.mode);
-  headers.set('x-wayfinder-verified', String(metadata.verified));
-  headers.set('x-wayfinder-gateway', metadata.gateway);
-  headers.set('x-wayfinder-txid', metadata.txId);
+  headers.set("x-wayfinder-mode", metadata.mode);
+  headers.set("x-wayfinder-verified", String(metadata.verified));
+  headers.set("x-wayfinder-gateway", metadata.gateway);
+  headers.set("x-wayfinder-txid", metadata.txId);
 
   if (metadata.verificationTimeMs !== undefined) {
     headers.set(
-      'x-wayfinder-verification-time-ms',
+      "x-wayfinder-verification-time-ms",
       String(metadata.verificationTimeMs),
     );
   }
 
   if (metadata.cached) {
-    headers.set('x-wayfinder-cached', 'true');
+    headers.set("x-wayfinder-cached", "true");
   }
 }
 
@@ -128,11 +126,11 @@ export function extractArnsInfo(headers: Headers): {
   processId: string | null;
 } {
   return {
-    txId: headers.get('x-arns-resolved-id'),
-    ttlSeconds: headers.get('x-arns-ttl-seconds')
-      ? parseInt(headers.get('x-arns-ttl-seconds')!, 10)
+    txId: headers.get("x-arns-resolved-id"),
+    ttlSeconds: headers.get("x-arns-ttl-seconds")
+      ? parseInt(headers.get("x-arns-ttl-seconds")!, 10)
       : null,
-    processId: headers.get('x-arns-resolved-process-id'),
+    processId: headers.get("x-arns-resolved-process-id"),
   };
 }
 
@@ -140,7 +138,7 @@ export function extractArnsInfo(headers: Headers): {
  * Extract digest from gateway headers
  */
 export function extractDigest(headers: Headers): string | null {
-  return headers.get('x-ar-io-digest');
+  return headers.get("x-ar-io-digest");
 }
 
 /**
@@ -148,7 +146,7 @@ export function extractDigest(headers: Headers): string | null {
  * This is the txId of the content being returned (may differ from requested txId for manifests)
  */
 export function extractDataId(headers: Headers): string | null {
-  return headers.get('x-ar-io-data-id');
+  return headers.get("x-ar-io-data-id");
 }
 
 /**
@@ -162,8 +160,8 @@ export interface ManifestHeaderInfo {
 }
 
 export function extractManifestInfo(headers: Headers): ManifestHeaderInfo {
-  const resolvedId = headers.get('x-arns-resolved-id');
-  const dataId = headers.get('x-ar-io-data-id');
+  const resolvedId = headers.get("x-arns-resolved-id");
+  const dataId = headers.get("x-ar-io-data-id");
 
   return {
     resolvedId,
@@ -200,16 +198,18 @@ export function isManifestResponse(
  * Get all verification-related headers as a record
  * Used when passing headers to verification functions
  */
-export function extractVerificationHeaders(headers: Headers): Record<string, string> {
+export function extractVerificationHeaders(
+  headers: Headers,
+): Record<string, string> {
   const result: Record<string, string> = {};
 
   const verificationHeaders = [
-    'x-ar-io-digest',
-    'x-ar-io-data-id',
-    'x-arns-resolved-id',
-    'x-ar-io-verified',
-    'content-length',
-    'content-type',
+    "x-ar-io-digest",
+    "x-ar-io-data-id",
+    "x-arns-resolved-id",
+    "x-ar-io-verified",
+    "content-length",
+    "content-type",
   ];
 
   for (const name of verificationHeaders) {

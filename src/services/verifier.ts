@@ -6,10 +6,14 @@
  * When disabled: passes through without verification
  */
 
-import { createHash } from 'node:crypto';
-import type { VerificationStrategy as SdkVerificationStrategy } from '@ar.io/wayfinder-core';
-import type { Logger, RouterConfig, VerificationResult } from '../types/index.js';
-import { VerificationError } from '../middleware/error-handler.js';
+import { createHash } from "node:crypto";
+import type { VerificationStrategy as SdkVerificationStrategy } from "@ar.io/wayfinder-core";
+import type {
+  Logger,
+  RouterConfig,
+  VerificationResult,
+} from "../types/index.js";
+import { VerificationError } from "../middleware/error-handler.js";
 
 export interface VerifierOptions {
   verificationStrategy: SdkVerificationStrategy | null;
@@ -51,7 +55,7 @@ export class Verifier {
         verified: false,
         txId,
         durationMs: 0,
-        error: 'Verification disabled',
+        error: "Verification disabled",
       };
     }
 
@@ -74,23 +78,28 @@ export class Verifier {
 
       const durationMs = Date.now() - startTime;
 
-      this.logger.debug('Verification succeeded', {
+      // Compute hash for logging/caching purposes
+      const hash = this.computeHash(data);
+
+      this.logger.debug("Verification succeeded", {
         txId,
         durationMs,
         dataSize: data.length,
+        hash,
       });
 
       return {
         verified: true,
         txId,
         durationMs,
+        hash,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
 
-      this.logger.warn('Verification failed', {
+      this.logger.warn("Verification failed", {
         txId,
         durationMs,
         error: errorMessage,
@@ -122,7 +131,7 @@ export class Verifier {
           verified: false,
           txId,
           durationMs: 0,
-          error: 'Verification disabled',
+          error: "Verification disabled",
         }),
       };
     }
@@ -141,6 +150,7 @@ export class Verifier {
   ): StreamingVerificationResult {
     const logger = this.logger;
     const strategy = this.strategy!;
+    const computeHash = this.computeHash.bind(this);
 
     let resolveVerification: (result: VerificationResult) => void;
     let rejectVerification: (error: Error) => void;
@@ -194,10 +204,14 @@ export class Verifier {
 
           const durationMs = Date.now() - startTime;
 
-          logger.debug('Verification succeeded', {
+          // Compute hash for logging/caching purposes
+          const hash = computeHash(fullData);
+
+          logger.debug("Verification succeeded", {
             txId,
             durationMs,
             dataSize: totalSize,
+            hash,
           });
 
           // Verification passed - stream the data
@@ -208,13 +222,14 @@ export class Verifier {
             verified: true,
             txId,
             durationMs,
+            hash,
           });
         } catch (error) {
           const durationMs = Date.now() - startTime;
           const errorMessage =
             error instanceof Error ? error.message : String(error);
 
-          logger.error('Verification failed', {
+          logger.error("Verification failed", {
             txId,
             durationMs,
             error: errorMessage,
@@ -238,7 +253,7 @@ export class Verifier {
    * Compute SHA-256 hash of data (for custom verification)
    */
   computeHash(data: Uint8Array): string {
-    return createHash('sha256').update(data).digest('base64url');
+    return createHash("sha256").update(data).digest("base64url");
   }
 }
 

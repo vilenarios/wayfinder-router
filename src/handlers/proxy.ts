@@ -12,16 +12,23 @@
  * - Verifies content against expected txId from manifest
  */
 
-import type { Context } from 'hono';
-import type { Logger, RouterConfig, RequestInfo } from '../types/index.js';
-import type { ArnsResolver } from '../services/arns-resolver.js';
-import type { ContentFetcher } from '../services/content-fetcher.js';
-import type { Verifier } from '../services/verifier.js';
-import type { ManifestResolver } from '../services/manifest-resolver.js';
-import type { TelemetryService } from '../telemetry/service.js';
-import type { RequestOutcome, VerificationOutcome } from '../types/telemetry.js';
-import type { ContentCache } from '../cache/content-cache.js';
-import { addWayfinderHeaders, extractManifestInfo, isManifestResponse } from '../utils/headers.js';
+import type { Context } from "hono";
+import type { Logger, RouterConfig, RequestInfo } from "../types/index.js";
+import type { ArnsResolver } from "../services/arns-resolver.js";
+import type { ContentFetcher } from "../services/content-fetcher.js";
+import type { Verifier } from "../services/verifier.js";
+import type { ManifestResolver } from "../services/manifest-resolver.js";
+import type { TelemetryService } from "../telemetry/service.js";
+import type {
+  RequestOutcome,
+  VerificationOutcome,
+} from "../types/telemetry.js";
+import type { ContentCache } from "../cache/content-cache.js";
+import {
+  addWayfinderHeaders,
+  extractManifestInfo,
+  isManifestResponse,
+} from "../utils/headers.js";
 
 export interface ProxyHandlerDeps {
   arnsResolver: ArnsResolver;
@@ -38,25 +45,33 @@ export interface ProxyHandlerDeps {
  * Create proxy handler
  */
 export function createProxyHandler(deps: ProxyHandlerDeps) {
-  const { arnsResolver, contentFetcher, verifier, manifestResolver, logger, telemetryService, contentCache } = deps;
+  const {
+    arnsResolver,
+    contentFetcher,
+    verifier,
+    manifestResolver,
+    logger,
+    telemetryService,
+    contentCache,
+  } = deps;
 
   return async (c: Context): Promise<Response> => {
-    const requestInfo = c.get('requestInfo') as RequestInfo;
+    const requestInfo = c.get("requestInfo") as RequestInfo;
     const traceId = crypto.randomUUID();
 
-    logger.debug('Proxy handler invoked', {
+    logger.debug("Proxy handler invoked", {
       requestInfo,
       traceId,
     });
 
     // Handle based on request type
-    if (requestInfo.type === 'arns') {
+    if (requestInfo.type === "arns") {
       return handleArnsRequest(c, requestInfo, traceId);
-    } else if (requestInfo.type === 'txid') {
+    } else if (requestInfo.type === "txid") {
       return handleTxIdRequest(c, requestInfo, traceId);
     } else {
       // Reserved path - should not reach proxy handler
-      return c.json({ error: 'Not Found' }, 404);
+      return c.json({ error: "Not Found" }, 404);
     }
   };
 
@@ -65,13 +80,13 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
    */
   async function handleArnsRequest(
     c: Context,
-    requestInfo: { type: 'arns'; arnsName: string; path: string },
+    requestInfo: { type: "arns"; arnsName: string; path: string },
     traceId: string,
   ): Promise<Response> {
     const { arnsName, path } = requestInfo;
     const startTime = Date.now();
 
-    logger.info('Processing ArNS proxy request', {
+    logger.info("Processing ArNS proxy request", {
       arnsName,
       path,
       traceId,
@@ -81,7 +96,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     const resolution = await arnsResolver.resolve(arnsName);
     const { txId } = resolution;
 
-    logger.debug('ArNS resolved', {
+    logger.debug("ArNS resolved", {
       arnsName,
       txId,
       traceId,
@@ -103,18 +118,29 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
     // Handle verification if enabled
     if (verifier.enabled && response.body) {
-      return handleVerifiedResponse(c, response, txId, path, gateway, headers, startTime, traceId, 'arns', arnsName);
+      return handleVerifiedResponse(
+        c,
+        response,
+        txId,
+        path,
+        gateway,
+        headers,
+        startTime,
+        traceId,
+        "arns",
+        arnsName,
+      );
     }
 
     // No verification - pass through directly
     addWayfinderHeaders(headers, {
-      mode: 'proxy',
+      mode: "proxy",
       verified: false,
       gateway: gateway.toString(),
       txId,
     });
 
-    logger.info('ArNS proxy request completed (unverified)', {
+    logger.info("ArNS proxy request completed (unverified)", {
       arnsName,
       txId,
       gateway: gateway.toString(),
@@ -126,13 +152,15 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     recordTelemetry({
       traceId,
       gateway: gateway.toString(),
-      requestType: 'arns',
+      requestType: "arns",
       identifier: arnsName,
       path,
-      outcome: 'success',
+      outcome: "success",
       httpStatus: response.status,
       startTime,
-      bytesReceived: parseInt(response.headers.get('content-length') || '0', 10) || undefined,
+      bytesReceived:
+        parseInt(response.headers.get("content-length") || "0", 10) ||
+        undefined,
     });
 
     return new Response(response.body, {
@@ -146,13 +174,13 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
    */
   async function handleTxIdRequest(
     c: Context,
-    requestInfo: { type: 'txid'; txId: string; path: string },
+    requestInfo: { type: "txid"; txId: string; path: string },
     traceId: string,
   ): Promise<Response> {
     const { txId, path } = requestInfo;
     const startTime = Date.now();
 
-    logger.info('Processing txId proxy request', {
+    logger.info("Processing txId proxy request", {
       txId,
       path,
       traceId,
@@ -173,18 +201,29 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
     // Handle verification if enabled
     if (verifier.enabled && response.body) {
-      return handleVerifiedResponse(c, response, txId, path, gateway, headers, startTime, traceId, 'txid', txId);
+      return handleVerifiedResponse(
+        c,
+        response,
+        txId,
+        path,
+        gateway,
+        headers,
+        startTime,
+        traceId,
+        "txid",
+        txId,
+      );
     }
 
     // No verification - pass through directly
     addWayfinderHeaders(headers, {
-      mode: 'proxy',
+      mode: "proxy",
       verified: false,
       gateway: gateway.toString(),
       txId,
     });
 
-    logger.info('TxId proxy request completed (unverified)', {
+    logger.info("TxId proxy request completed (unverified)", {
       txId,
       gateway: gateway.toString(),
       durationMs: Date.now() - startTime,
@@ -195,13 +234,15 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     recordTelemetry({
       traceId,
       gateway: gateway.toString(),
-      requestType: 'txid',
+      requestType: "txid",
       identifier: txId,
       path,
-      outcome: 'success',
+      outcome: "success",
       httpStatus: response.status,
       startTime,
-      bytesReceived: parseInt(response.headers.get('content-length') || '0', 10) || undefined,
+      bytesReceived:
+        parseInt(response.headers.get("content-length") || "0", 10) ||
+        undefined,
     });
 
     return new Response(response.body, {
@@ -226,14 +267,14 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     headers: Headers,
     startTime: number,
     traceId: string,
-    requestType: 'arns' | 'txid',
+    requestType: "arns" | "txid",
     identifier: string,
   ): Promise<Response> {
     // Extract manifest info from gateway response headers
     const manifestInfo = extractManifestInfo(response.headers);
     const isManifest = isManifestResponse(manifestInfo, requestedTxId);
 
-    logger.debug('Checking for manifest response', {
+    logger.debug("Checking for manifest response", {
       requestedTxId,
       path,
       resolvedId: manifestInfo.resolvedId,
@@ -252,7 +293,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       // For txId requests, the manifest txId is the requestedTxId itself
       manifestTxId = manifestInfo.resolvedId || requestedTxId;
 
-      logger.debug('Manifest response detected, verifying path mapping', {
+      logger.debug("Manifest response detected, verifying path mapping", {
         manifestTxId,
         dataId: manifestInfo.dataId,
         path,
@@ -261,9 +302,12 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
       try {
         // Get and verify the manifest from trusted gateways
-        const pathResolution = await manifestResolver.resolvePath(manifestTxId, path);
+        const pathResolution = await manifestResolver.resolvePath(
+          manifestTxId,
+          path,
+        );
 
-        logger.debug('Manifest path resolved', {
+        logger.debug("Manifest path resolved", {
           manifestTxId,
           path,
           expectedContentTxId: pathResolution.contentTxId,
@@ -274,13 +318,16 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
         // Verify that the gateway returned the correct content for this path
         if (pathResolution.contentTxId !== manifestInfo.dataId) {
-          logger.error('Manifest path mapping mismatch - gateway may be malicious', {
-            manifestTxId,
-            path,
-            expectedContentTxId: pathResolution.contentTxId,
-            actualDataId: manifestInfo.dataId,
-            traceId,
-          });
+          logger.error(
+            "Manifest path mapping mismatch - gateway may be malicious",
+            {
+              manifestTxId,
+              path,
+              expectedContentTxId: pathResolution.contentTxId,
+              actualDataId: manifestInfo.dataId,
+              traceId,
+            },
+          );
           throw new Error(
             `Gateway returned wrong content for manifest path. Expected ${pathResolution.contentTxId}, got ${manifestInfo.dataId}`,
           );
@@ -289,7 +336,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         // Use the content txId from manifest for verification
         contentTxId = pathResolution.contentTxId;
       } catch (error) {
-        logger.error('Failed to verify manifest path mapping', {
+        logger.error("Failed to verify manifest path mapping", {
           manifestTxId,
           path,
           error: error instanceof Error ? error.message : String(error),
@@ -302,9 +349,9 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     // NOW we can check the cache - we know the actual content txId
     // Cache by contentTxId only (not path) since the same content can be accessed via different paths
     if (contentCache) {
-      const cached = contentCache.get(contentTxId, '');
+      const cached = contentCache.get(contentTxId, "");
       if (cached) {
-        logger.info('Serving verified content from cache', {
+        logger.info("Serving verified content from cache", {
           contentTxId,
           manifestTxId,
           path,
@@ -315,11 +362,11 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         // Record cache hit telemetry
         recordTelemetry({
           traceId,
-          gateway: 'cache',
+          gateway: "cache",
           requestType,
           identifier,
           path,
-          outcome: 'success',
+          outcome: "success",
           httpStatus: 200,
           startTime,
           bytesReceived: cached.contentLength,
@@ -361,7 +408,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     headers: Headers,
     startTime: number,
     traceId: string,
-    requestType: 'arns' | 'txid',
+    requestType: "arns" | "txid",
     identifier: string,
   ): Promise<Response> {
     // Convert response headers to plain object for SDK
@@ -372,11 +419,12 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
     // Create verification pipeline (buffers, verifies, then streams)
     // Use contentTxId (which may be from manifest resolution) for verification
-    const { stream, verificationPromise } = verifier.createStreamingVerification(
-      response.body!,
-      contentTxId,
-      headersObj,
-    );
+    const { stream, verificationPromise } =
+      verifier.createStreamingVerification(
+        response.body!,
+        contentTxId,
+        headersObj,
+      );
 
     try {
       // Consume the stream to get verified data
@@ -403,7 +451,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
       // Add wayfinder headers - include manifest info if applicable
       addWayfinderHeaders(headers, {
-        mode: 'proxy',
+        mode: "proxy",
         verified: true,
         gateway: gateway.toString(),
         txId: contentTxId,
@@ -412,10 +460,10 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
       // Add manifest-specific header if this was a manifest response
       if (manifestTxId) {
-        headers.set('x-wayfinder-manifest-txid', manifestTxId);
+        headers.set("x-wayfinder-manifest-txid", manifestTxId);
       }
 
-      logger.info('Proxy request completed (verified)', {
+      logger.info("Proxy request completed (verified)", {
         contentTxId,
         manifestTxId,
         path,
@@ -435,9 +483,10 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         });
 
         // Cache by content txId with empty path (content is the same regardless of manifest path)
-        const cached = contentCache.set(contentTxId, '', {
+        const cached = contentCache.set(contentTxId, "", {
           data,
-          contentType: headers.get('content-type') || 'application/octet-stream',
+          contentType:
+            headers.get("content-type") || "application/octet-stream",
           contentLength: totalLength,
           headers: headersForCache,
           verifiedAt: Date.now(),
@@ -446,7 +495,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         });
 
         if (cached) {
-          logger.info('Verified content added to cache', {
+          logger.info("Verified content added to cache", {
             contentTxId,
             manifestTxId,
             path,
@@ -467,7 +516,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         startTime,
         httpStatus: response.status,
         bytesReceived: totalLength,
-        verificationOutcome: 'verified',
+        verificationOutcome: "verified",
         verificationDurationMs: verificationResult.durationMs,
       });
 
@@ -477,7 +526,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       });
     } catch (error) {
       // Verification failed - do not serve content
-      logger.error('Verification failed, blocking content', {
+      logger.error("Verification failed, blocking content", {
         contentTxId,
         manifestTxId,
         path,
@@ -496,7 +545,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         contentTxId,
         startTime,
         httpStatus: response.status,
-        verificationOutcome: 'failed',
+        verificationOutcome: "failed",
       });
 
       throw error;
@@ -509,7 +558,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
   function recordTelemetry(params: {
     traceId: string;
     gateway: string;
-    requestType: 'arns' | 'txid';
+    requestType: "arns" | "txid";
     identifier: string;
     path: string;
     outcome: RequestOutcome;
@@ -526,7 +575,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       requestType: params.requestType,
       identifier: params.identifier,
       path: params.path,
-      mode: 'proxy',
+      mode: "proxy",
       outcome: params.outcome,
       httpStatus: params.httpStatus,
       latency: {
@@ -542,7 +591,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
   function recordTelemetryWithVerification(params: {
     traceId: string;
     gateway: string;
-    requestType: 'arns' | 'txid';
+    requestType: "arns" | "txid";
     identifier: string;
     path: string;
     contentTxId: string;
@@ -561,8 +610,9 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       requestType: params.requestType,
       identifier: params.identifier,
       path: params.path,
-      mode: 'proxy',
-      outcome: params.verificationOutcome === 'failed' ? 'server_error' : 'success',
+      mode: "proxy",
+      outcome:
+        params.verificationOutcome === "failed" ? "server_error" : "success",
       httpStatus: params.httpStatus,
       latency: {
         totalMs: Date.now() - params.startTime,

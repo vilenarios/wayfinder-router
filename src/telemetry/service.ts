@@ -3,16 +3,16 @@
  * Main service that coordinates telemetry collection, storage, and export
  */
 
-import type { Logger } from '../types/index.js';
+import type { Logger } from "../types/index.js";
 import type {
   TelemetryConfig,
   GatewayRequestEvent,
   GatewayStatsSummary,
   GatewayRewardExport,
   GatewayHourlyStats,
-} from '../types/telemetry.js';
-import { TelemetryCollector, RequestTracker } from './collector.js';
-import { TelemetryStorage } from './storage.js';
+} from "../types/telemetry.js";
+import { TelemetryCollector, RequestTracker } from "./collector.js";
+import { TelemetryStorage } from "./storage.js";
 
 export interface TelemetryServiceOptions {
   config: TelemetryConfig;
@@ -62,7 +62,7 @@ export class TelemetryService {
       24 * 60 * 60 * 1000,
     );
 
-    this.logger.info('Telemetry service initialized', {
+    this.logger.info("Telemetry service initialized", {
       enabled: options.config.enabled,
       samplingRate: options.config.sampling.successfulRequests,
       retentionDays: options.config.storage.retentionDays,
@@ -75,10 +75,10 @@ export class TelemetryService {
   track(params: {
     traceId: string;
     gateway: string;
-    requestType: 'arns' | 'txid';
+    requestType: "arns" | "txid";
     identifier: string;
     path: string;
-    mode: 'proxy' | 'route';
+    mode: "proxy" | "route";
   }): RequestTracker {
     return this.collector.createTracker(params);
   }
@@ -150,51 +150,67 @@ export class TelemetryService {
     const lines: string[] = [];
 
     // Gateway request counters
-    lines.push('# HELP wayfinder_gateway_requests_total Total requests per gateway');
-    lines.push('# TYPE wayfinder_gateway_requests_total counter');
+    lines.push(
+      "# HELP wayfinder_gateway_requests_total Total requests per gateway",
+    );
+    lines.push("# TYPE wayfinder_gateway_requests_total counter");
     for (const [key, count] of this.counters.requests) {
-      const [gateway, outcome] = key.split(':');
+      const [gateway, outcome] = key.split(":");
       lines.push(
         `wayfinder_gateway_requests_total{gateway="${gateway}",outcome="${outcome}"} ${count}`,
       );
     }
-    lines.push('');
+    lines.push("");
 
     // Gateway verification counters
-    lines.push('# HELP wayfinder_gateway_verifications_total Verification results per gateway');
-    lines.push('# TYPE wayfinder_gateway_verifications_total counter');
+    lines.push(
+      "# HELP wayfinder_gateway_verifications_total Verification results per gateway",
+    );
+    lines.push("# TYPE wayfinder_gateway_verifications_total counter");
     for (const [key, count] of this.counters.verifications) {
-      const [gateway, outcome] = key.split(':');
+      const [gateway, outcome] = key.split(":");
       lines.push(
         `wayfinder_gateway_verifications_total{gateway="${gateway}",outcome="${outcome}"} ${count}`,
       );
     }
-    lines.push('');
+    lines.push("");
 
     // Gateway latency
-    lines.push('# HELP wayfinder_gateway_latency_seconds_sum Sum of request latencies');
-    lines.push('# TYPE wayfinder_gateway_latency_seconds_sum counter');
+    lines.push(
+      "# HELP wayfinder_gateway_latency_seconds_sum Sum of request latencies",
+    );
+    lines.push("# TYPE wayfinder_gateway_latency_seconds_sum counter");
     for (const [gateway, sum] of this.counters.latencySum) {
-      lines.push(`wayfinder_gateway_latency_seconds_sum{gateway="${gateway}"} ${sum / 1000}`);
+      lines.push(
+        `wayfinder_gateway_latency_seconds_sum{gateway="${gateway}"} ${sum / 1000}`,
+      );
     }
-    lines.push('');
+    lines.push("");
 
-    lines.push('# HELP wayfinder_gateway_latency_seconds_count Count of latency measurements');
-    lines.push('# TYPE wayfinder_gateway_latency_seconds_count counter');
+    lines.push(
+      "# HELP wayfinder_gateway_latency_seconds_count Count of latency measurements",
+    );
+    lines.push("# TYPE wayfinder_gateway_latency_seconds_count counter");
     for (const [gateway, count] of this.counters.latencyCount) {
-      lines.push(`wayfinder_gateway_latency_seconds_count{gateway="${gateway}"} ${count}`);
+      lines.push(
+        `wayfinder_gateway_latency_seconds_count{gateway="${gateway}"} ${count}`,
+      );
     }
-    lines.push('');
+    lines.push("");
 
     // Gateway bytes served
-    lines.push('# HELP wayfinder_gateway_bytes_served_total Total bytes served per gateway');
-    lines.push('# TYPE wayfinder_gateway_bytes_served_total counter');
+    lines.push(
+      "# HELP wayfinder_gateway_bytes_served_total Total bytes served per gateway",
+    );
+    lines.push("# TYPE wayfinder_gateway_bytes_served_total counter");
     for (const [gateway, bytes] of this.counters.bytesServed) {
-      lines.push(`wayfinder_gateway_bytes_served_total{gateway="${gateway}"} ${bytes}`);
+      lines.push(
+        `wayfinder_gateway_bytes_served_total{gateway="${gateway}"} ${bytes}`,
+      );
     }
-    lines.push('');
+    lines.push("");
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   /**
@@ -203,7 +219,8 @@ export class TelemetryService {
   getGatewayStats(startHour?: string, endHour?: string): GatewayStatsSummary[] {
     // Default to last 24 hours
     const end = endHour || new Date().toISOString();
-    const start = startHour || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const start =
+      startHour || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     return this.storage.getGatewaySummaries(start, end);
   }
@@ -217,7 +234,8 @@ export class TelemetryService {
     endHour?: string,
   ): GatewayHourlyStats[] {
     const end = endHour || new Date().toISOString();
-    const start = startHour || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const start =
+      startHour || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     return this.storage.getHourlyStats(gateway, start, end);
   }
@@ -227,7 +245,8 @@ export class TelemetryService {
    */
   exportRewardData(startHour?: string, endHour?: string): GatewayRewardExport {
     const end = endHour || new Date().toISOString();
-    const start = startHour || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const start =
+      startHour || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     return this.storage.exportRewardData(start, end);
   }
@@ -265,14 +284,16 @@ export class TelemetryService {
     this.collector.stop();
     this.storage.close();
 
-    this.logger.info('Telemetry service stopped');
+    this.logger.info("Telemetry service stopped");
   }
 }
 
 /**
  * Create a disabled telemetry service (no-op)
  */
-export function createDisabledTelemetryService(logger: Logger): TelemetryService | null {
-  logger.info('Telemetry disabled');
+export function createDisabledTelemetryService(
+  logger: Logger,
+): TelemetryService | null {
+  logger.info("Telemetry disabled");
   return null;
 }

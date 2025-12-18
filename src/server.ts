@@ -3,52 +3,66 @@
  * Main Hono server setup with all middleware and handlers
  */
 
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { logger as honoLogger } from 'hono/logger';
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { logger as honoLogger } from "hono/logger";
 
-import type { RouterConfig, Logger, RequestInfo, RouterMode } from './types/index.js';
-import { createRequestParserMiddleware } from './middleware/request-parser.js';
-import { createModeSelectorMiddleware } from './middleware/mode-selector.js';
-import { createRateLimitMiddleware } from './middleware/rate-limiter.js';
-import { createErrorResponse } from './middleware/error-handler.js';
+import type {
+  RouterConfig,
+  Logger,
+  RequestInfo,
+  RouterMode,
+} from "./types/index.js";
+import { createRequestParserMiddleware } from "./middleware/request-parser.js";
+import { createModeSelectorMiddleware } from "./middleware/mode-selector.js";
+import { createRateLimitMiddleware } from "./middleware/rate-limiter.js";
+import { createErrorResponse } from "./middleware/error-handler.js";
 
 import {
   createWayfinderServices,
   createNetworkManager,
   type WayfinderServices,
-} from './services/wayfinder-client.js';
-import type { NetworkGatewayManager } from './services/network-gateway-manager.js';
-import { createArnsResolver, type ArnsResolver } from './services/arns-resolver.js';
+} from "./services/wayfinder-client.js";
+import type { NetworkGatewayManager } from "./services/network-gateway-manager.js";
+import {
+  createArnsResolver,
+  type ArnsResolver,
+} from "./services/arns-resolver.js";
 import {
   createGatewaySelector,
   type GatewaySelector,
-} from './services/gateway-selector.js';
-import { createVerifier, type Verifier } from './services/verifier.js';
-import { createContentFetcher, type ContentFetcher } from './services/content-fetcher.js';
+} from "./services/gateway-selector.js";
+import { createVerifier, type Verifier } from "./services/verifier.js";
+import {
+  createContentFetcher,
+  type ContentFetcher,
+} from "./services/content-fetcher.js";
 import {
   createManifestResolver,
   type ManifestResolver,
-} from './services/manifest-resolver.js';
+} from "./services/manifest-resolver.js";
 
-import { createProxyHandler } from './handlers/proxy.js';
-import { createRouteHandler } from './handlers/route.js';
+import { createProxyHandler } from "./handlers/proxy.js";
+import { createRouteHandler } from "./handlers/route.js";
 import {
   createHealthHandler,
   createReadyHandler,
   createMetricsHandler,
-} from './handlers/health.js';
+} from "./handlers/health.js";
 import {
   createGatewayStatsHandler,
   createGatewayDetailHandler,
   createGatewayListHandler,
   createRewardExportHandler,
-} from './handlers/stats.js';
-import { TelemetryService, createDisabledTelemetryService } from './telemetry/service.js';
-import { ContentCache } from './cache/content-cache.js';
+} from "./handlers/stats.js";
+import {
+  TelemetryService,
+  createDisabledTelemetryService,
+} from "./telemetry/service.js";
+import { ContentCache } from "./cache/content-cache.js";
 
 // Extend Hono context with our custom variables
-declare module 'hono' {
+declare module "hono" {
   interface ContextVariableMap {
     requestInfo: RequestInfo;
     routerMode: RouterMode;
@@ -83,7 +97,11 @@ export function createServer(options: CreateServerOptions) {
   const networkGatewayManager = createNetworkManager(config, logger);
 
   // Initialize Wayfinder SDK services (network manager must be initialized later)
-  const wayfinderServices = createWayfinderServices(config, logger, networkGatewayManager);
+  const wayfinderServices = createWayfinderServices(
+    config,
+    logger,
+    networkGatewayManager,
+  );
 
   // Initialize application services
   // ArNS resolver uses verification gateways for consensus
@@ -109,7 +127,13 @@ export function createServer(options: CreateServerOptions) {
   const contentFetcher = createContentFetcher(gatewaySelector, config, logger);
 
   // Initialize manifest resolver for verifying path manifests
-  const manifestResolver = createManifestResolver(config, verifier, logger);
+  // Uses the same verification gateways as ArNS resolver for trust
+  const manifestResolver = createManifestResolver(
+    config,
+    verifier,
+    logger,
+    wayfinderServices.verificationGatewaysProvider,
+  );
 
   // Initialize verified content cache
   const contentCache = new ContentCache({
@@ -127,10 +151,10 @@ export function createServer(options: CreateServerOptions) {
       config: config.telemetry,
       logger,
       routerId: config.telemetry.routerId,
-      routerVersion: process.env.npm_package_version || '0.1.0',
+      routerVersion: process.env.npm_package_version || "0.1.0",
       baseDomain: config.server.baseDomain,
     });
-    logger.info('Telemetry service initialized', {
+    logger.info("Telemetry service initialized", {
       routerId: config.telemetry.routerId,
       samplingRate: config.telemetry.sampling.successfulRequests,
     });
@@ -154,21 +178,21 @@ export function createServer(options: CreateServerOptions) {
   const app = new Hono();
 
   // Global middleware
-  app.use('*', cors());
+  app.use("*", cors());
 
   // Rate limiting (applied early, but skips health endpoints internally)
-  app.use('*', createRateLimitMiddleware(config));
+  app.use("*", createRateLimitMiddleware(config));
 
   // Request logging (only in development)
-  if (config.logging.level === 'debug') {
-    app.use('*', honoLogger());
+  if (config.logging.level === "debug") {
+    app.use("*", honoLogger());
   }
 
   // Request parsing middleware
-  app.use('*', createRequestParserMiddleware(config));
+  app.use("*", createRequestParserMiddleware(config));
 
   // Mode selection middleware
-  app.use('*', createModeSelectorMiddleware(config));
+  app.use("*", createModeSelectorMiddleware(config));
 
   // Health check endpoints (before main routing)
   const healthDeps = {
@@ -179,12 +203,12 @@ export function createServer(options: CreateServerOptions) {
     startTime,
   };
 
-  app.get('/health', createHealthHandler(healthDeps));
-  app.get('/ready', createReadyHandler(healthDeps));
+  app.get("/health", createHealthHandler(healthDeps));
+  app.get("/ready", createReadyHandler(healthDeps));
 
   // Metrics endpoint (enhanced with telemetry and cache metrics)
   const baseMetricsHandler = createMetricsHandler(healthDeps);
-  app.get('/metrics', async (c) => {
+  app.get("/metrics", async (c) => {
     const baseResponse = await baseMetricsHandler(c);
     let metrics = await baseResponse.text();
 
@@ -201,43 +225,47 @@ export function createServer(options: CreateServerOptions) {
     return new Response(metrics, {
       status: 200,
       headers: {
-        'Content-Type': 'text/plain; version=0.0.4',
+        "Content-Type": "text/plain; version=0.0.4",
       },
     });
   });
 
   // Stats API endpoints (only when telemetry enabled)
   const statsDeps = { telemetryService, logger };
-  app.get('/stats/gateways', createGatewayStatsHandler(statsDeps));
-  app.get('/stats/gateways/list', createGatewayListHandler(statsDeps));
-  app.get('/stats/gateways/:gateway', createGatewayDetailHandler(statsDeps));
-  app.get('/stats/export', createRewardExportHandler(statsDeps));
+  app.get("/stats/gateways", createGatewayStatsHandler(statsDeps));
+  app.get("/stats/gateways/list", createGatewayListHandler(statsDeps));
+  app.get("/stats/gateways/:gateway", createGatewayDetailHandler(statsDeps));
+  app.get("/stats/export", createRewardExportHandler(statsDeps));
 
   // Main request handler
-  app.all('*', async (c) => {
-    const requestInfo = c.get('requestInfo');
-    const routerMode = c.get('routerMode');
+  app.all("*", async (c) => {
+    const requestInfo = c.get("requestInfo");
+    const routerMode = c.get("routerMode");
 
     // Skip reserved paths
-    if (requestInfo.type === 'reserved') {
+    if (requestInfo.type === "reserved") {
       // Check for specific reserved paths
-      if (requestInfo.path === '/health' || requestInfo.path === '/ready' || requestInfo.path === '/metrics') {
+      if (
+        requestInfo.path === "/health" ||
+        requestInfo.path === "/ready" ||
+        requestInfo.path === "/metrics"
+      ) {
         // Already handled above, this shouldn't happen
-        return c.json({ error: 'Not Found' }, 404);
+        return c.json({ error: "Not Found" }, 404);
       }
 
       // Root path without txId
-      if (requestInfo.path === '/' || requestInfo.path === '') {
+      if (requestInfo.path === "/" || requestInfo.path === "") {
         return c.json({
-          name: 'Wayfinder Router',
-          version: process.env.npm_package_version || '0.1.0',
-          description: 'Lightweight proxy router for ar.io network gateways',
+          name: "Wayfinder Router",
+          version: process.env.npm_package_version || "0.1.0",
+          description: "Lightweight proxy router for ar.io network gateways",
           endpoints: {
-            arns: 'https://{arnsName}.' + config.server.baseDomain,
-            txid: 'https://' + config.server.baseDomain + '/{txId}',
-            health: '/health',
-            ready: '/ready',
-            metrics: '/metrics',
+            arns: "https://{arnsName}." + config.server.baseDomain,
+            txid: "https://" + config.server.baseDomain + "/{txId}",
+            health: "/health",
+            ready: "/ready",
+            metrics: "/metrics",
           },
           mode: config.mode.default,
           verification: {
@@ -246,12 +274,12 @@ export function createServer(options: CreateServerOptions) {
         });
       }
 
-      return c.json({ error: 'Not Found', path: requestInfo.path }, 404);
+      return c.json({ error: "Not Found", path: requestInfo.path }, 404);
     }
 
     // Route to appropriate handler based on mode
     try {
-      if (routerMode === 'route') {
+      if (routerMode === "route") {
         const routeHandler = createRouteHandler({
           arnsResolver,
           gatewaySelector,
@@ -287,7 +315,7 @@ export function createServer(options: CreateServerOptions) {
     return createErrorResponse(c, err, logger);
   });
 
-  logger.info('Server created', {
+  logger.info("Server created", {
     baseDomain: config.server.baseDomain,
     mode: config.mode.default,
     verificationEnabled: config.verification.enabled,

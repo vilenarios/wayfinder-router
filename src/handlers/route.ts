@@ -3,16 +3,16 @@
  * Redirects requests to gateway URLs without proxying
  */
 
-import type { Context } from 'hono';
-import type { Logger, RouterConfig, RequestInfo } from '../types/index.js';
-import type { ArnsResolver } from '../services/arns-resolver.js';
-import type { GatewaySelector } from '../services/gateway-selector.js';
-import type { TelemetryService } from '../telemetry/service.js';
+import type { Context } from "hono";
+import type { Logger, RouterConfig, RequestInfo } from "../types/index.js";
+import type { ArnsResolver } from "../services/arns-resolver.js";
+import type { GatewaySelector } from "../services/gateway-selector.js";
+import type { TelemetryService } from "../telemetry/service.js";
 import {
   constructGatewayUrl,
   constructArnsGatewayUrl,
   sandboxFromTxId,
-} from '../utils/url.js';
+} from "../utils/url.js";
 
 export interface RouteHandlerDeps {
   arnsResolver: ArnsResolver;
@@ -29,22 +29,22 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
   const { arnsResolver, gatewaySelector, logger, telemetryService } = deps;
 
   return async (c: Context): Promise<Response> => {
-    const requestInfo = c.get('requestInfo') as RequestInfo;
+    const requestInfo = c.get("requestInfo") as RequestInfo;
     const traceId = crypto.randomUUID();
 
-    logger.debug('Route handler invoked', {
+    logger.debug("Route handler invoked", {
       requestInfo,
       traceId,
     });
 
     // Handle based on request type
-    if (requestInfo.type === 'arns') {
+    if (requestInfo.type === "arns") {
       return handleArnsRoute(c, requestInfo, traceId);
-    } else if (requestInfo.type === 'txid') {
+    } else if (requestInfo.type === "txid") {
       return handleTxIdRoute(c, requestInfo, traceId);
     } else {
       // Reserved path - should not reach route handler
-      return c.json({ error: 'Not Found' }, 404);
+      return c.json({ error: "Not Found" }, 404);
     }
   };
 
@@ -53,13 +53,13 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
    */
   async function handleArnsRoute(
     c: Context,
-    requestInfo: { type: 'arns'; arnsName: string; path: string },
+    requestInfo: { type: "arns"; arnsName: string; path: string },
     traceId: string,
   ): Promise<Response> {
     const { arnsName, path } = requestInfo;
     const startTime = Date.now();
 
-    logger.info('Processing ArNS route request', {
+    logger.info("Processing ArNS route request", {
       arnsName,
       path,
       traceId,
@@ -68,7 +68,7 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
     // Resolve ArNS to txId (still need consensus for security)
     const resolution = await arnsResolver.resolve(arnsName);
 
-    logger.debug('ArNS resolved for routing', {
+    logger.debug("ArNS resolved for routing", {
       arnsName,
       txId: resolution.txId,
       traceId,
@@ -84,7 +84,7 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
       path,
     });
 
-    logger.info('ArNS route redirect', {
+    logger.info("ArNS route redirect", {
       arnsName,
       txId: resolution.txId,
       gateway: gateway.toString(),
@@ -99,11 +99,11 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
         traceId,
         timestamp: startTime,
         gateway: gateway.toString(),
-        requestType: 'arns',
+        requestType: "arns",
         identifier: arnsName,
         path,
-        mode: 'route',
-        outcome: 'success',
+        mode: "route",
+        outcome: "success",
         httpStatus: 302,
         latency: {
           totalMs: Date.now() - startTime,
@@ -120,13 +120,13 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
    */
   async function handleTxIdRoute(
     c: Context,
-    requestInfo: { type: 'txid'; txId: string; path: string },
+    requestInfo: { type: "txid"; txId: string; path: string },
     traceId: string,
   ): Promise<Response> {
     const { txId, path } = requestInfo;
     const startTime = Date.now();
 
-    logger.info('Processing txId route request', {
+    logger.info("Processing txId route request", {
       txId,
       path,
       traceId,
@@ -143,7 +143,7 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
       useSubdomain: true,
     });
 
-    logger.info('TxId route redirect', {
+    logger.info("TxId route redirect", {
       txId,
       gateway: gateway.toString(),
       redirectUrl: redirectUrl.toString(),
@@ -158,11 +158,11 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
         traceId,
         timestamp: startTime,
         gateway: gateway.toString(),
-        requestType: 'txid',
+        requestType: "txid",
         identifier: txId,
         path,
-        mode: 'route',
-        outcome: 'success',
+        mode: "route",
+        outcome: "success",
         httpStatus: 302,
         latency: {
           totalMs: Date.now() - startTime,

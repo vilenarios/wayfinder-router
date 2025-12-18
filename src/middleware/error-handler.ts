@@ -2,8 +2,8 @@
  * Error handling middleware for Wayfinder Router
  */
 
-import type { Context } from 'hono';
-import type { Logger } from '../types/index.js';
+import type { Context } from "hono";
+import type { Logger } from "../types/index.js";
 
 /**
  * Custom error classes
@@ -14,7 +14,7 @@ export class WayfinderError extends Error {
 
   constructor(message: string, statusCode: number, code: string) {
     super(message);
-    this.name = 'WayfinderError';
+    this.name = "WayfinderError";
     this.statusCode = statusCode;
     this.code = code;
   }
@@ -24,8 +24,8 @@ export class ArnsResolutionError extends WayfinderError {
   public readonly arnsName: string;
 
   constructor(arnsName: string, message: string) {
-    super(message, 404, 'ARNS_RESOLUTION_FAILED');
-    this.name = 'ArnsResolutionError';
+    super(message, 404, "ARNS_RESOLUTION_FAILED");
+    this.name = "ArnsResolutionError";
     this.arnsName = arnsName;
   }
 }
@@ -38,9 +38,9 @@ export class ArnsConsensusMismatchError extends WayfinderError {
     super(
       `ArNS resolution mismatch for "${arnsName}": gateways returned different transaction IDs`,
       502,
-      'ARNS_CONSENSUS_MISMATCH',
+      "ARNS_CONSENSUS_MISMATCH",
     );
-    this.name = 'ArnsConsensusMismatchError';
+    this.name = "ArnsConsensusMismatchError";
     this.arnsName = arnsName;
     this.resolvedTxIds = resolvedTxIds;
   }
@@ -57,8 +57,8 @@ export class VerificationError extends WayfinderError {
     expectedHash?: string,
     computedHash?: string,
   ) {
-    super(message, 502, 'VERIFICATION_FAILED');
-    this.name = 'VerificationError';
+    super(message, 502, "VERIFICATION_FAILED");
+    this.name = "VerificationError";
     this.txId = txId;
     this.expectedHash = expectedHash;
     this.computedHash = computedHash;
@@ -69,16 +69,16 @@ export class GatewayError extends WayfinderError {
   public readonly gateway: string;
 
   constructor(gateway: string, message: string, statusCode: number = 502) {
-    super(message, statusCode, 'GATEWAY_ERROR');
-    this.name = 'GatewayError';
+    super(message, statusCode, "GATEWAY_ERROR");
+    this.name = "GatewayError";
     this.gateway = gateway;
   }
 }
 
 export class NoHealthyGatewaysError extends WayfinderError {
   constructor() {
-    super('No healthy gateways available', 503, 'NO_HEALTHY_GATEWAYS');
-    this.name = 'NoHealthyGatewaysError';
+    super("No healthy gateways available", 503, "NO_HEALTHY_GATEWAYS");
+    this.name = "NoHealthyGatewaysError";
   }
 }
 
@@ -92,13 +92,13 @@ export function createErrorResponse(
 ): Response {
   // Log the error
   if (error instanceof WayfinderError) {
-    logger.warn('Request failed', {
+    logger.warn("Request failed", {
       code: error.code,
       message: error.message,
       statusCode: error.statusCode,
     });
   } else {
-    logger.error('Unexpected error', {
+    logger.error("Unexpected error", {
       message: error.message,
       stack: error.stack,
     });
@@ -107,8 +107,8 @@ export function createErrorResponse(
   // Determine status code and response body
   let statusCode = 500;
   let body: Record<string, unknown> = {
-    error: 'Internal Server Error',
-    message: 'An unexpected error occurred',
+    error: "Internal Server Error",
+    message: "An unexpected error occurred",
   };
 
   if (error instanceof WayfinderError) {
@@ -122,14 +122,14 @@ export function createErrorResponse(
     if (error instanceof ArnsConsensusMismatchError) {
       body.arnsName = error.arnsName;
       body.hint =
-        'Multiple trusted gateways returned different transaction IDs. This may indicate a security issue.';
+        "Multiple trusted gateways returned different transaction IDs. This may indicate a security issue.";
     } else if (error instanceof VerificationError) {
       body.txId = error.txId;
       body.hint =
-        'Data verification failed. The content may have been tampered with.';
+        "Data verification failed. The content may have been tampered with.";
     } else if (error instanceof NoHealthyGatewaysError) {
       body.hint =
-        'All configured gateways are currently unavailable. Please try again later.';
+        "All configured gateways are currently unavailable. Please try again later.";
     }
   }
 

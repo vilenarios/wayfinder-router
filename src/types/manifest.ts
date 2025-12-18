@@ -9,7 +9,7 @@
  */
 export interface ArweaveManifest {
   /** Manifest type identifier */
-  manifest: 'arweave/paths';
+  manifest: "arweave/paths";
   /** Manifest version */
   version: string;
   /** Index configuration - path to serve for root requests */
@@ -64,16 +64,16 @@ export interface ManifestPathResolution {
  * Check if an object is a valid Arweave manifest
  */
 export function isArweaveManifest(obj: unknown): obj is ArweaveManifest {
-  if (typeof obj !== 'object' || obj === null) {
+  if (typeof obj !== "object" || obj === null) {
     return false;
   }
 
   const manifest = obj as Record<string, unknown>;
 
   return (
-    manifest.manifest === 'arweave/paths' &&
-    typeof manifest.version === 'string' &&
-    typeof manifest.paths === 'object' &&
+    manifest.manifest === "arweave/paths" &&
+    typeof manifest.version === "string" &&
+    typeof manifest.paths === "object" &&
     manifest.paths !== null
   );
 }
@@ -85,10 +85,10 @@ export function isArweaveManifest(obj: unknown): obj is ArweaveManifest {
  */
 export function normalizeManifestPath(path: string): string {
   // Remove leading slash
-  let normalized = path.startsWith('/') ? path.slice(1) : path;
+  let normalized = path.startsWith("/") ? path.slice(1) : path;
 
   // Remove trailing slash (unless it's the root)
-  if (normalized.endsWith('/') && normalized.length > 1) {
+  if (normalized.endsWith("/") && normalized.length > 1) {
     normalized = normalized.slice(0, -1);
   }
 

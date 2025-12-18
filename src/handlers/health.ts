@@ -3,10 +3,10 @@
  * Provides health, readiness, and metrics endpoints
  */
 
-import type { Context } from 'hono';
-import type { Logger, RouterConfig } from '../types/index.js';
-import type { GatewaySelector } from '../services/gateway-selector.js';
-import type { ArnsResolver } from '../services/arns-resolver.js';
+import type { Context } from "hono";
+import type { Logger, RouterConfig } from "../types/index.js";
+import type { GatewaySelector } from "../services/gateway-selector.js";
+import type { ArnsResolver } from "../services/arns-resolver.js";
 
 export interface HealthHandlerDeps {
   gatewaySelector: GatewaySelector;
@@ -24,12 +24,12 @@ export function createHealthHandler(deps: HealthHandlerDeps) {
     const uptimeMs = Date.now() - deps.startTime;
 
     return c.json({
-      status: 'healthy',
+      status: "healthy",
       uptime: {
         ms: uptimeMs,
         human: formatUptime(uptimeMs),
       },
-      version: process.env.npm_package_version || '0.1.0',
+      version: process.env.npm_package_version || "0.1.0",
     });
   };
 }
@@ -52,30 +52,30 @@ export function createReadyHandler(deps: HealthHandlerDeps) {
 
       if (ready) {
         return c.json({
-          status: 'ready',
+          status: "ready",
           gateways: healthStats,
         });
       }
 
-      logger.warn('Readiness check failed - no healthy gateways');
+      logger.warn("Readiness check failed - no healthy gateways");
 
       return c.json(
         {
-          status: 'not_ready',
-          reason: 'No healthy gateways available',
+          status: "not_ready",
+          reason: "No healthy gateways available",
           gateways: healthStats,
         },
         503,
       );
     } catch (error) {
-      logger.error('Readiness check error', {
+      logger.error("Readiness check error", {
         error: error instanceof Error ? error.message : String(error),
       });
 
       return c.json(
         {
-          status: 'error',
-          reason: error instanceof Error ? error.message : 'Unknown error',
+          status: "error",
+          reason: error instanceof Error ? error.message : "Unknown error",
         },
         503,
       );
@@ -97,36 +97,36 @@ export function createMetricsHandler(deps: HealthHandlerDeps) {
 
     // Format as Prometheus metrics
     const metrics = [
-      '# HELP wayfinder_router_uptime_seconds Uptime in seconds',
-      '# TYPE wayfinder_router_uptime_seconds gauge',
+      "# HELP wayfinder_router_uptime_seconds Uptime in seconds",
+      "# TYPE wayfinder_router_uptime_seconds gauge",
       `wayfinder_router_uptime_seconds ${uptimeMs / 1000}`,
-      '',
-      '# HELP wayfinder_router_gateways_total Total number of tracked gateways',
-      '# TYPE wayfinder_router_gateways_total gauge',
+      "",
+      "# HELP wayfinder_router_gateways_total Total number of tracked gateways",
+      "# TYPE wayfinder_router_gateways_total gauge",
       `wayfinder_router_gateways_total ${gatewayStats.total}`,
-      '',
-      '# HELP wayfinder_router_gateways_healthy Number of healthy gateways',
-      '# TYPE wayfinder_router_gateways_healthy gauge',
+      "",
+      "# HELP wayfinder_router_gateways_healthy Number of healthy gateways",
+      "# TYPE wayfinder_router_gateways_healthy gauge",
       `wayfinder_router_gateways_healthy ${gatewayStats.healthy}`,
-      '',
-      '# HELP wayfinder_router_gateways_unhealthy Number of unhealthy gateways',
-      '# TYPE wayfinder_router_gateways_unhealthy gauge',
+      "",
+      "# HELP wayfinder_router_gateways_unhealthy Number of unhealthy gateways",
+      "# TYPE wayfinder_router_gateways_unhealthy gauge",
       `wayfinder_router_gateways_unhealthy ${gatewayStats.unhealthy}`,
-      '',
-      '# HELP wayfinder_router_gateways_circuit_open Number of gateways with open circuits',
-      '# TYPE wayfinder_router_gateways_circuit_open gauge',
+      "",
+      "# HELP wayfinder_router_gateways_circuit_open Number of gateways with open circuits",
+      "# TYPE wayfinder_router_gateways_circuit_open gauge",
       `wayfinder_router_gateways_circuit_open ${gatewayStats.circuitOpen}`,
-      '',
-      '# HELP wayfinder_router_arns_cache_size Number of cached ArNS resolutions',
-      '# TYPE wayfinder_router_arns_cache_size gauge',
+      "",
+      "# HELP wayfinder_router_arns_cache_size Number of cached ArNS resolutions",
+      "# TYPE wayfinder_router_arns_cache_size gauge",
       `wayfinder_router_arns_cache_size ${arnsStats.size}`,
-      '',
-    ].join('\n');
+      "",
+    ].join("\n");
 
     return new Response(metrics, {
       status: 200,
       headers: {
-        'Content-Type': 'text/plain; version=0.0.4',
+        "Content-Type": "text/plain; version=0.0.4",
       },
     });
   };

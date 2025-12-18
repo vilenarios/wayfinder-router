@@ -3,21 +3,18 @@
  * SQLite-based persistent storage for gateway telemetry
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import Database from 'better-sqlite3';
-import type { Logger } from '../types/index.js';
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import Database from "better-sqlite3";
+import type { Logger } from "../types/index.js";
 import type {
   GatewayRequestEvent,
   GatewayHourlyStats,
   GatewayStatsSummary,
   GatewayRewardExport,
   TelemetryConfig,
-} from '../types/telemetry.js';
-import {
-  getHourBucket,
-  getLatencyBucket,
-} from '../types/telemetry.js';
+} from "../types/telemetry.js";
+import { getHourBucket, getLatencyBucket } from "../types/telemetry.js";
 
 export interface TelemetryStorageOptions {
   config: TelemetryConfig;
@@ -52,11 +49,11 @@ export class TelemetryStorage {
     // Initialize database with error handling
     try {
       this.db = new Database(dbPath);
-      this.db.pragma('journal_mode = WAL');
+      this.db.pragma("journal_mode = WAL");
       this.initializeSchema();
-      this.logger.info('Telemetry storage initialized', { path: dbPath });
+      this.logger.info("Telemetry storage initialized", { path: dbPath });
     } catch (error) {
-      this.logger.error('Failed to initialize telemetry database', {
+      this.logger.error("Failed to initialize telemetry database", {
         path: dbPath,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -154,36 +151,41 @@ export class TelemetryStorage {
   /**
    * Update hourly aggregated stats
    */
-  private updateHourlyStats(event: GatewayRequestEvent, hourBucket: string): void {
+  private updateHourlyStats(
+    event: GatewayRequestEvent,
+    hourBucket: string,
+  ): void {
     const latencyBucketKey = getLatencyBucket(event.latency.totalMs);
 
     // Prepare values
-    const isSuccess = event.outcome === 'success' ? 1 : 0;
-    const isClientError = event.outcome === 'client_error' ? 1 : 0;
-    const isServerError = event.outcome === 'server_error' ? 1 : 0;
-    const isTimeout = event.outcome === 'timeout' ? 1 : 0;
-    const isConnectionError = event.outcome === 'connection_error' ? 1 : 0;
+    const isSuccess = event.outcome === "success" ? 1 : 0;
+    const isClientError = event.outcome === "client_error" ? 1 : 0;
+    const isServerError = event.outcome === "server_error" ? 1 : 0;
+    const isTimeout = event.outcome === "timeout" ? 1 : 0;
+    const isConnectionError = event.outcome === "connection_error" ? 1 : 0;
 
     const hasVerification = event.verification ? 1 : 0;
-    const verifySuccess = event.verification?.outcome === 'verified' ? 1 : 0;
-    const verifyFailed = event.verification?.outcome === 'failed' ? 1 : 0;
-    const verifySkipped = event.verification?.outcome === 'skipped' ? 1 : 0;
+    const verifySuccess = event.verification?.outcome === "verified" ? 1 : 0;
+    const verifyFailed = event.verification?.outcome === "failed" ? 1 : 0;
+    const verifySkipped = event.verification?.outcome === "skipped" ? 1 : 0;
 
     const hasConsensus = event.consensus ? 1 : 0;
-    const consensusAgreed = event.consensus?.outcome === 'agreed' ? 1 : 0;
-    const consensusDisagreed = event.consensus?.outcome === 'disagreed' ? 1 : 0;
+    const consensusAgreed = event.consensus?.outcome === "agreed" ? 1 : 0;
+    const consensusDisagreed = event.consensus?.outcome === "disagreed" ? 1 : 0;
 
     // First, try to get existing record for latency bucket merge
     const existingStmt = this.db.prepare(`
       SELECT latency_buckets FROM gateway_hourly_stats
       WHERE gateway = ? AND hour_bucket = ?
     `);
-    const existing = existingStmt.get(event.gateway, hourBucket) as { latency_buckets: string } | undefined;
+    const existing = existingStmt.get(event.gateway, hourBucket) as
+      | { latency_buckets: string }
+      | undefined;
 
     // Merge latency buckets in JavaScript
     let mergedBuckets: Record<string, number>;
     if (existing) {
-      const existingBuckets = JSON.parse(existing.latency_buckets || '{}');
+      const existingBuckets = JSON.parse(existing.latency_buckets || "{}");
       mergedBuckets = {
         ...existingBuckets,
         [latencyBucketKey]: (existingBuckets[latencyBucketKey] || 0) + 1,
@@ -278,7 +280,11 @@ export class TelemetryStorage {
   /**
    * Get hourly stats for a gateway
    */
-  getHourlyStats(gateway: string, startHour: string, endHour: string): GatewayHourlyStats[] {
+  getHourlyStats(
+    gateway: string,
+    startHour: string,
+    endHour: string,
+  ): GatewayHourlyStats[] {
     const stmt = this.db.prepare(`
       SELECT * FROM gateway_hourly_stats
       WHERE gateway = ? AND hour_bucket >= ? AND hour_bucket < ?
@@ -308,7 +314,10 @@ export class TelemetryStorage {
   /**
    * Get summary stats for all gateways in a time range
    */
-  getGatewaySummaries(startHour: string, endHour: string): GatewayStatsSummary[] {
+  getGatewaySummaries(
+    startHour: string,
+    endHour: string,
+  ): GatewayStatsSummary[] {
     const stmt = this.db.prepare(`
       SELECT
         gateway,
@@ -339,7 +348,9 @@ export class TelemetryStorage {
     // Calculate total hours in range
     const startDate = new Date(startHour);
     const endDate = new Date(endHour);
-    const totalHours = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
+    const totalHours = Math.ceil(
+      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60),
+    );
 
     return rows.map((row) => {
       const totalRequests = row.total_requests || 0;
@@ -360,12 +371,17 @@ export class TelemetryStorage {
         bytesServed: row.bytes_served || 0,
         successRate: totalRequests > 0 ? successfulRequests / totalRequests : 0,
         verificationSuccessRate:
-          verificationAttempts > 0 ? verificationSuccess / verificationAttempts : 0,
+          verificationAttempts > 0
+            ? verificationSuccess / verificationAttempts
+            : 0,
         consensusAgreementRate:
-          consensusParticipations > 0 ? consensusAgreements / consensusParticipations : 0,
+          consensusParticipations > 0
+            ? consensusAgreements / consensusParticipations
+            : 0,
         errorRate:
           totalRequests > 0
-            ? (row.server_errors + row.timeouts + row.connection_errors) / totalRequests
+            ? (row.server_errors + row.timeouts + row.connection_errors) /
+              totalRequests
             : 0,
         avgLatencyMs: latencyCount > 0 ? latencySum / latencyCount : 0,
         p50LatencyMs: 0, // Would need histogram aggregation
@@ -391,7 +407,12 @@ export class TelemetryStorage {
         totalGateways: acc.totalGateways + 1,
         activeGateways: acc.activeGateways + (gw.totalRequests > 0 ? 1 : 0),
       }),
-      { totalRequests: 0, totalBytesServed: 0, totalGateways: 0, activeGateways: 0 },
+      {
+        totalRequests: 0,
+        totalBytesServed: 0,
+        totalGateways: 0,
+        activeGateways: 0,
+      },
     );
 
     return {
@@ -425,7 +446,9 @@ export class TelemetryStorage {
     const retentionDays = this.config.storage.retentionDays;
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
-    const cutoffHour = cutoffDate.toISOString().replace(/:\d{2}\.\d{3}Z$/, ':00:00.000Z');
+    const cutoffHour = cutoffDate
+      .toISOString()
+      .replace(/:\d{2}\.\d{3}Z$/, ":00:00.000Z");
 
     // Delete old hourly stats
     const deleteStats = this.db.prepare(`
@@ -443,7 +466,7 @@ export class TelemetryStorage {
     const totalDeleted = statsResult.changes + eventsResult.changes;
 
     if (totalDeleted > 0) {
-      this.logger.info('Cleaned up old telemetry data', {
+      this.logger.info("Cleaned up old telemetry data", {
         statsDeleted: statsResult.changes,
         eventsDeleted: eventsResult.changes,
         retentionDays,
@@ -475,7 +498,7 @@ export class TelemetryStorage {
       consensusDisagreements: row.consensus_disagreements,
       latencySum: row.latency_sum,
       latencyCount: row.latency_count,
-      latencyBuckets: JSON.parse(row.latency_buckets || '{}'),
+      latencyBuckets: JSON.parse(row.latency_buckets || "{}"),
       bytesServed: row.bytes_served,
     };
   }
@@ -485,6 +508,6 @@ export class TelemetryStorage {
    */
   close(): void {
     this.db.close();
-    this.logger.info('Telemetry storage closed');
+    this.logger.info("Telemetry storage closed");
   }
 }

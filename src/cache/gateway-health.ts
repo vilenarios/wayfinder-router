@@ -3,7 +3,7 @@
  * Tracks healthy/unhealthy gateways with circuit breaker pattern
  */
 
-import type { GatewayHealth, Logger } from '../types/index.js';
+import type { GatewayHealth, Logger } from "../types/index.js";
 
 export interface GatewayHealthCacheOptions {
   healthTtlMs?: number;
@@ -38,7 +38,7 @@ export class GatewayHealthCache {
    * Normalize gateway URL to string key
    */
   private normalizeKey(gateway: URL | string): string {
-    const url = typeof gateway === 'string' ? new URL(gateway) : gateway;
+    const url = typeof gateway === "string" ? new URL(gateway) : gateway;
     return `${url.protocol}//${url.host}`;
   }
 
@@ -58,7 +58,7 @@ export class GatewayHealthCache {
     // Check if circuit breaker has reset
     if (state.circuitOpen && now > state.circuitOpenUntil) {
       // Circuit is closing, allow a test request
-      this.logger?.debug('Circuit breaker half-open', { gateway: key });
+      this.logger?.debug("Circuit breaker half-open", { gateway: key });
       return true;
     }
 
@@ -94,7 +94,7 @@ export class GatewayHealthCache {
       state.circuitOpenUntil = 0;
       state.lastChecked = Date.now();
 
-      this.logger?.debug('Gateway marked healthy', { gateway: key });
+      this.logger?.debug("Gateway marked healthy", { gateway: key });
     }
   }
 
@@ -121,7 +121,7 @@ export class GatewayHealthCache {
     state.failures++;
     state.lastChecked = now;
 
-    this.logger?.debug('Gateway failure recorded', {
+    this.logger?.debug("Gateway failure recorded", {
       gateway: key,
       failures: state.failures,
     });
@@ -132,7 +132,7 @@ export class GatewayHealthCache {
       state.circuitOpen = true;
       state.circuitOpenUntil = now + this.circuitBreakerResetMs;
 
-      this.logger?.warn('Circuit breaker opened', {
+      this.logger?.warn("Circuit breaker opened", {
         gateway: key,
         resetAt: new Date(state.circuitOpenUntil).toISOString(),
       });
@@ -156,7 +156,7 @@ export class GatewayHealthCache {
 
     this.health.set(key, state);
 
-    this.logger?.warn('Gateway marked unhealthy', {
+    this.logger?.warn("Gateway marked unhealthy", {
       gateway: key,
       durationMs: durationMs ?? this.circuitBreakerResetMs,
     });
@@ -167,7 +167,7 @@ export class GatewayHealthCache {
    */
   clear(): void {
     this.health.clear();
-    this.logger?.info('Gateway health cache cleared');
+    this.logger?.info("Gateway health cache cleared");
   }
 
   /**

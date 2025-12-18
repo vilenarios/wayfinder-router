@@ -2,7 +2,7 @@
  * URL utilities for Wayfinder Router
  */
 
-import { createHash } from 'node:crypto';
+import { createHash } from "node:crypto";
 
 // Transaction ID regex - exactly 43 base64url characters
 const TX_ID_REGEX = /^[A-Za-z0-9_-]{43}$/;
@@ -36,7 +36,7 @@ export function isArnsName(value: string): boolean {
 export function sandboxFromTxId(txId: string): string {
   // Use base32 encoding of first 32 bytes of SHA-256 hash
   // This matches the ar.io gateway sandbox format
-  const hash = createHash('sha256').update(txId).digest();
+  const hash = createHash("sha256").update(txId).digest();
   return base32Encode(hash.subarray(0, 20)).toLowerCase();
 }
 
@@ -44,8 +44,8 @@ export function sandboxFromTxId(txId: string): string {
  * Base32 encode (RFC 4648, no padding)
  */
 function base32Encode(data: Uint8Array): string {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  let result = '';
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let result = "";
   let bits = 0;
   let value = 0;
 
@@ -78,7 +78,7 @@ export function constructGatewayUrl(params: {
   const { gateway, txId, path, useSubdomain = true } = params;
 
   // For localhost, always use path-based routing
-  if (gateway.hostname === 'localhost' || gateway.hostname === '127.0.0.1') {
+  if (gateway.hostname === "localhost" || gateway.hostname === "127.0.0.1") {
     const url = new URL(gateway);
     url.pathname = `/${txId}${path}`;
     return url;
@@ -89,7 +89,7 @@ export function constructGatewayUrl(params: {
     const sandbox = sandboxFromTxId(txId);
     const url = new URL(gateway);
     url.hostname = `${sandbox}.${url.hostname}`;
-    url.pathname = path || '/';
+    url.pathname = path || "/";
     return url;
   }
 
@@ -110,7 +110,7 @@ export function constructArnsGatewayUrl(params: {
   const { gateway, arnsName, path } = params;
 
   // For localhost, use path-based routing
-  if (gateway.hostname === 'localhost' || gateway.hostname === '127.0.0.1') {
+  if (gateway.hostname === "localhost" || gateway.hostname === "127.0.0.1") {
     const url = new URL(gateway);
     url.pathname = `/${arnsName}${path}`;
     return url;
@@ -119,7 +119,7 @@ export function constructArnsGatewayUrl(params: {
   // Use ArNS name as subdomain
   const url = new URL(gateway);
   url.hostname = `${arnsName.toLowerCase()}.${url.hostname}`;
-  url.pathname = path || '/';
+  url.pathname = path || "/";
   return url;
 }
 
@@ -127,6 +127,6 @@ export function constructArnsGatewayUrl(params: {
  * Normalize a path (ensure leading slash, handle empty)
  */
 export function normalizePath(path: string): string {
-  if (!path || path === '/') return '/';
-  return path.startsWith('/') ? path : `/${path}`;
+  if (!path || path === "/") return "/";
+  return path.startsWith("/") ? path : `/${path}`;
 }

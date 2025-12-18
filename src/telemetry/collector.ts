@@ -3,13 +3,13 @@
  * Collects gateway request events with configurable sampling
  */
 
-import type { Logger } from '../types/index.js';
+import type { Logger } from "../types/index.js";
 import type {
   GatewayRequestEvent,
   TelemetryConfig,
   RequestOutcome,
   VerificationOutcome,
-} from '../types/telemetry.js';
+} from "../types/telemetry.js";
 
 export interface TelemetryCollectorOptions {
   config: TelemetryConfig;
@@ -40,7 +40,7 @@ export class TelemetryCollector {
     if (!this.config.enabled) return false;
 
     // Always sample errors
-    if (outcome !== 'success') {
+    if (outcome !== "success") {
       return Math.random() < this.config.sampling.errors;
     }
 
@@ -70,10 +70,10 @@ export class TelemetryCollector {
   createTracker(params: {
     traceId: string;
     gateway: string;
-    requestType: 'arns' | 'txid';
+    requestType: "arns" | "txid";
     identifier: string;
     path: string;
-    mode: 'proxy' | 'route';
+    mode: "proxy" | "route";
   }): RequestTracker {
     return new RequestTracker(params, this);
   }
@@ -91,14 +91,14 @@ export class TelemetryCollector {
       try {
         this.onEvent(event);
       } catch (error) {
-        this.logger.error('Failed to process telemetry event', {
+        this.logger.error("Failed to process telemetry event", {
           error: error instanceof Error ? error.message : String(error),
           traceId: event.traceId,
         });
       }
     }
 
-    this.logger.debug('Flushed telemetry events', { count: events.length });
+    this.logger.debug("Flushed telemetry events", { count: events.length });
   }
 
   /**
@@ -126,10 +126,10 @@ export class RequestTracker {
     params: {
       traceId: string;
       gateway: string;
-      requestType: 'arns' | 'txid';
+      requestType: "arns" | "txid";
       identifier: string;
       path: string;
-      mode: 'proxy' | 'route';
+      mode: "proxy" | "route";
     },
     collector: TelemetryCollector,
   ) {
@@ -167,7 +167,7 @@ export class RequestTracker {
    * Record consensus participation
    */
   recordConsensus(params: {
-    outcome: 'agreed' | 'disagreed' | 'insufficient' | 'error';
+    outcome: "agreed" | "disagreed" | "insufficient" | "error";
     participatingGateways: string[];
     agreementCount: number;
   }): void {
@@ -202,7 +202,7 @@ export class RequestTracker {
    * Complete with error
    */
   completeWithError(
-    outcome: 'timeout' | 'connection_error' | 'server_error',
+    outcome: "timeout" | "connection_error" | "server_error",
     _error?: Error,
   ): void {
     this.complete(outcome);

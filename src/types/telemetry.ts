@@ -4,9 +4,18 @@
  */
 
 // Request outcome types
-export type RequestOutcome = 'success' | 'client_error' | 'server_error' | 'timeout' | 'connection_error';
-export type VerificationOutcome = 'verified' | 'failed' | 'skipped' | 'error';
-export type ConsensusOutcome = 'agreed' | 'disagreed' | 'insufficient' | 'error';
+export type RequestOutcome =
+  | "success"
+  | "client_error"
+  | "server_error"
+  | "timeout"
+  | "connection_error";
+export type VerificationOutcome = "verified" | "failed" | "skipped" | "error";
+export type ConsensusOutcome =
+  | "agreed"
+  | "disagreed"
+  | "insufficient"
+  | "error";
 
 /**
  * Individual telemetry event for a gateway request
@@ -20,10 +29,10 @@ export interface GatewayRequestEvent {
   gateway: string;
 
   // Request details
-  requestType: 'arns' | 'txid';
+  requestType: "arns" | "txid";
   identifier: string; // ArNS name or txId
   path: string;
-  mode: 'proxy' | 'route';
+  mode: "proxy" | "route";
 
   // Outcome
   outcome: RequestOutcome;
@@ -172,7 +181,7 @@ export interface TelemetryConfig {
 
   // Storage
   storage: {
-    type: 'sqlite';
+    type: "sqlite";
     path: string;
     retentionDays: number;
   };
@@ -191,7 +200,9 @@ export interface TelemetryConfig {
 /**
  * Latency histogram bucket boundaries (in ms)
  */
-export const LATENCY_BUCKETS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000];
+export const LATENCY_BUCKETS = [
+  10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000,
+];
 
 /**
  * Get the bucket for a latency value
@@ -202,7 +213,7 @@ export function getLatencyBucket(latencyMs: number): string {
       return `le_${bucket}`;
     }
   }
-  return 'le_inf';
+  return "le_inf";
 }
 
 /**

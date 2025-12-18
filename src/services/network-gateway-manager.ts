@@ -13,9 +13,9 @@
  * - Stale cache preservation on fetch failures
  */
 
-import { ARIO } from '@ar.io/sdk';
-import type { GatewaysProvider } from '@ar.io/wayfinder-core';
-import type { Logger } from '../types/index.js';
+import { ARIO } from "@ar.io/sdk";
+import type { GatewaysProvider } from "@ar.io/wayfinder-core";
+import type { Logger } from "../types/index.js";
 
 export interface GatewayInfo {
   url: URL;
@@ -73,8 +73,8 @@ export class NetworkGatewayManager {
     this.refreshIntervalMs = options.refreshIntervalMs ?? 24 * 60 * 60 * 1000; // 24 hours
     this.minGateways = options.minGateways ?? 3;
     this.fallbackGateways = options.fallbackGateways ?? [
-      new URL('https://arweave.net'),
-      new URL('https://ar-io.dev'),
+      new URL("https://arweave.net"),
+      new URL("https://ar-io.dev"),
     ];
     this.logger = options.logger;
   }
@@ -84,7 +84,7 @@ export class NetworkGatewayManager {
    * Should be called on startup before serving requests.
    */
   async initialize(): Promise<void> {
-    this.logger.info('Initializing network gateway manager...');
+    this.logger.info("Initializing network gateway manager...");
 
     try {
       await this.fetchGateways();
@@ -92,7 +92,7 @@ export class NetworkGatewayManager {
       this.isInitialized = true;
 
       const cache = this.cache!;
-      this.logger.info('Network gateway manager initialized', {
+      this.logger.info("Network gateway manager initialized", {
         totalGateways: cache.allGateways.length,
         topGateway: cache.allGateways[0]?.fqdn,
         topStake: cache.allGateways[0]?.totalStake,
@@ -100,7 +100,7 @@ export class NetworkGatewayManager {
       });
     } catch (error) {
       // Log error but don't fail - use fallbacks
-      this.logger.error('Failed to initialize from network, using fallbacks', {
+      this.logger.error("Failed to initialize from network, using fallbacks", {
         error: error instanceof Error ? error.message : String(error),
         fallbackCount: this.fallbackGateways.length,
       });
@@ -179,7 +179,7 @@ export class NetworkGatewayManager {
    * Force a refresh of the gateway list.
    */
   async refresh(): Promise<void> {
-    this.logger.info('Forcing gateway list refresh');
+    this.logger.info("Forcing gateway list refresh");
     await this.fetchGateways();
   }
 
@@ -205,7 +205,10 @@ export class NetworkGatewayManager {
       isFallback: this.cache?.isFallback ?? true,
       ...this.stats,
       nextRefreshMs: this.cache
-        ? Math.max(0, this.refreshIntervalMs - (Date.now() - this.cache.fetchedAt))
+        ? Math.max(
+            0,
+            this.refreshIntervalMs - (Date.now() - this.cache.fetchedAt),
+          )
         : null,
     };
   }
@@ -218,7 +221,7 @@ export class NetworkGatewayManager {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
-    this.logger.info('Network gateway manager stopped');
+    this.logger.info("Network gateway manager stopped");
   }
 
   /**
@@ -276,7 +279,7 @@ export class NetworkGatewayManager {
     const startTime = Date.now();
     this.stats.fetchAttempts++;
 
-    this.logger.debug('Fetching gateways from ar.io network...');
+    this.logger.debug("Fetching gateways from ar.io network...");
 
     try {
       const ario = ARIO.mainnet();
@@ -287,10 +290,10 @@ export class NetworkGatewayManager {
       });
 
       if (!result.items || result.items.length === 0) {
-        throw new Error('No gateways returned from ar.io network');
+        throw new Error("No gateways returned from ar.io network");
       }
 
-      this.logger.debug('Received gateways from network', {
+      this.logger.debug("Received gateways from network", {
         count: result.items.length,
       });
 
@@ -299,7 +302,7 @@ export class NetworkGatewayManager {
 
       for (const gateway of result.items) {
         // Only include joined gateways with valid FQDN
-        if (gateway.status !== 'joined' || !gateway.settings?.fqdn) {
+        if (gateway.status !== "joined" || !gateway.settings?.fqdn) {
           continue;
         }
 
@@ -316,7 +319,7 @@ export class NetworkGatewayManager {
           });
         } catch {
           // Skip gateways with invalid URLs
-          this.logger.debug('Skipping gateway with invalid FQDN', {
+          this.logger.debug("Skipping gateway with invalid FQDN", {
             fqdn: gateway.settings.fqdn,
           });
         }
@@ -344,7 +347,7 @@ export class NetworkGatewayManager {
       this.stats.lastFetchDurationMs = durationMs;
       this.stats.lastError = null;
 
-      this.logger.info('Gateway list updated from network', {
+      this.logger.info("Gateway list updated from network", {
         totalGateways: gateways.length,
         topGateway: gateways[0]?.fqdn,
         topStake: gateways[0]?.totalStake,
@@ -354,13 +357,14 @@ export class NetworkGatewayManager {
       return gateways;
     } catch (error) {
       const durationMs = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
 
       this.stats.fetchFailures++;
       this.stats.lastFetchDurationMs = durationMs;
       this.stats.lastError = errorMessage;
 
-      this.logger.error('Failed to fetch gateways from network', {
+      this.logger.error("Failed to fetch gateways from network", {
         error: errorMessage,
         durationMs,
         hasStaleCache: this.cache !== null,
@@ -368,7 +372,7 @@ export class NetworkGatewayManager {
 
       // If we have stale cache, keep using it
       if (this.cache && this.cache.allGateways.length > 0) {
-        this.logger.warn('Using stale gateway cache', {
+        this.logger.warn("Using stale gateway cache", {
           cacheAge: Date.now() - this.cache.fetchedAt,
           gatewayCount: this.cache.allGateways.length,
         });
@@ -376,7 +380,7 @@ export class NetworkGatewayManager {
       }
 
       // Return fallbacks
-      this.logger.warn('Using fallback gateways', {
+      this.logger.warn("Using fallback gateways", {
         count: this.fallbackGateways.length,
       });
 
@@ -411,10 +415,10 @@ export class NetworkGatewayManager {
 
     this.refreshTimer = setInterval(async () => {
       try {
-        this.logger.debug('Scheduled gateway refresh starting');
+        this.logger.debug("Scheduled gateway refresh starting");
         await this.fetchGateways();
       } catch (error) {
-        this.logger.warn('Scheduled gateway refresh failed', {
+        this.logger.warn("Scheduled gateway refresh failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -423,7 +427,7 @@ export class NetworkGatewayManager {
     // Don't prevent process exit
     this.refreshTimer.unref();
 
-    this.logger.debug('Gateway refresh scheduled', {
+    this.logger.debug("Gateway refresh scheduled", {
       intervalMs: refreshInterval,
     });
   }

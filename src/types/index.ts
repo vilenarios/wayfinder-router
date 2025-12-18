@@ -3,38 +3,41 @@
  */
 
 // Request types
-export type RequestType = 'arns' | 'txid' | 'reserved';
+export type RequestType = "arns" | "txid" | "reserved";
 
 export interface ArnsRequestInfo {
-  type: 'arns';
+  type: "arns";
   arnsName: string;
   path: string;
 }
 
 export interface TxIdRequestInfo {
-  type: 'txid';
+  type: "txid";
   txId: string;
   path: string;
 }
 
 export interface ReservedRequestInfo {
-  type: 'reserved';
+  type: "reserved";
   path: string;
 }
 
-export type RequestInfo = ArnsRequestInfo | TxIdRequestInfo | ReservedRequestInfo;
+export type RequestInfo =
+  | ArnsRequestInfo
+  | TxIdRequestInfo
+  | ReservedRequestInfo;
 
 // Router modes
-export type RouterMode = 'proxy' | 'route';
+export type RouterMode = "proxy" | "route";
 
 // Routing strategies
-export type RoutingStrategy = 'fastest' | 'random' | 'round-robin';
+export type RoutingStrategy = "fastest" | "random" | "round-robin";
 
 // Gateway sources for ROUTING (where to fetch data - trust not required)
-export type RoutingGatewaySource = 'network' | 'trusted-peers' | 'static';
+export type RoutingGatewaySource = "network" | "trusted-peers" | "static";
 
 // Gateway sources for VERIFICATION (who to ask for hashes - trust required)
-export type VerificationGatewaySource = 'top-staked' | 'static';
+export type VerificationGatewaySource = "top-staked" | "static";
 
 // Configuration
 export interface RouterConfig {
@@ -114,7 +117,7 @@ export interface RouterConfig {
       latencyMeasurements: number;
     };
     storage: {
-      type: 'sqlite';
+      type: "sqlite";
       path: string;
       retentionDays: number;
     };
@@ -179,7 +182,7 @@ export interface Logger {
 }
 
 // Re-export telemetry types
-export type { TelemetryConfig } from './telemetry.js';
+export type { TelemetryConfig } from "./telemetry.js";
 
 // Re-export manifest types
 export type {
@@ -187,5 +190,5 @@ export type {
   ManifestPathEntry,
   VerifiedManifest,
   ManifestPathResolution,
-} from './manifest.js';
-export { isArweaveManifest, normalizeManifestPath } from './manifest.js';
+} from "./manifest.js";
+export { isArweaveManifest, normalizeManifestPath } from "./manifest.js";

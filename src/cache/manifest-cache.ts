@@ -3,8 +3,8 @@
  * LRU cache for verified Arweave manifests
  */
 
-import type { Logger } from '../types/index.js';
-import type { VerifiedManifest } from '../types/manifest.js';
+import type { Logger } from "../types/index.js";
+import type { VerifiedManifest } from "../types/manifest.js";
 
 export interface ManifestCacheOptions {
   /** Maximum number of manifests to cache */
@@ -35,7 +35,7 @@ export class ManifestCache {
     this.maxSize = options.maxSize;
     this.logger = options.logger;
 
-    this.logger.debug('ManifestCache initialized', {
+    this.logger.debug("ManifestCache initialized", {
       maxSize: this.maxSize,
     });
   }
@@ -55,7 +55,7 @@ export class ManifestCache {
     entry.lastAccessed = Date.now();
     this.hits++;
 
-    this.logger.debug('Manifest cache hit', { txId });
+    this.logger.debug("Manifest cache hit", { txId });
     return entry.manifest;
   }
 
@@ -73,7 +73,7 @@ export class ManifestCache {
       lastAccessed: Date.now(),
     });
 
-    this.logger.debug('Manifest cached', {
+    this.logger.debug("Manifest cached", {
       txId: manifest.txId,
       pathCount: Object.keys(manifest.manifest.paths).length,
       sizeBytes: manifest.sizeBytes,
@@ -99,7 +99,7 @@ export class ManifestCache {
    */
   clear(): void {
     this.cache.clear();
-    this.logger.info('Manifest cache cleared');
+    this.logger.info("Manifest cache cleared");
   }
 
   /**
@@ -138,7 +138,7 @@ export class ManifestCache {
 
     if (oldestKey) {
       this.cache.delete(oldestKey);
-      this.logger.debug('Manifest evicted from cache (LRU)', {
+      this.logger.debug("Manifest evicted from cache (LRU)", {
         txId: oldestKey,
       });
     }
@@ -150,18 +150,18 @@ export class ManifestCache {
   getPrometheusMetrics(): string {
     const stats = this.stats();
     return [
-      '# HELP wayfinder_manifest_cache_size Number of cached manifests',
-      '# TYPE wayfinder_manifest_cache_size gauge',
+      "# HELP wayfinder_manifest_cache_size Number of cached manifests",
+      "# TYPE wayfinder_manifest_cache_size gauge",
       `wayfinder_manifest_cache_size ${stats.size}`,
-      '',
-      '# HELP wayfinder_manifest_cache_hits_total Manifest cache hits',
-      '# TYPE wayfinder_manifest_cache_hits_total counter',
+      "",
+      "# HELP wayfinder_manifest_cache_hits_total Manifest cache hits",
+      "# TYPE wayfinder_manifest_cache_hits_total counter",
       `wayfinder_manifest_cache_hits_total ${stats.hits}`,
-      '',
-      '# HELP wayfinder_manifest_cache_misses_total Manifest cache misses',
-      '# TYPE wayfinder_manifest_cache_misses_total counter',
+      "",
+      "# HELP wayfinder_manifest_cache_misses_total Manifest cache misses",
+      "# TYPE wayfinder_manifest_cache_misses_total counter",
       `wayfinder_manifest_cache_misses_total ${stats.misses}`,
-      '',
-    ].join('\n');
+      "",
+    ].join("\n");
   }
 }

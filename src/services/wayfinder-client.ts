@@ -17,10 +17,10 @@ import {
   type GatewaysProvider,
   type RoutingStrategy as SdkRoutingStrategy,
   type VerificationStrategy as SdkVerificationStrategy,
-} from '@ar.io/wayfinder-core';
+} from "@ar.io/wayfinder-core";
 
-import type { RouterConfig, Logger, RoutingStrategy } from '../types/index.js';
-import { NetworkGatewayManager } from './network-gateway-manager.js';
+import type { RouterConfig, Logger, RoutingStrategy } from "../types/index.js";
+import { NetworkGatewayManager } from "./network-gateway-manager.js";
 
 export interface WayfinderServices {
   /** Provider for routing gateways (where to fetch data) */
@@ -59,15 +59,17 @@ function createRoutingGatewaysProvider(
   const sdkLogger = createSdkLogger(logger);
 
   switch (config.routing.gatewaySource) {
-    case 'network': {
+    case "network": {
       if (!networkManager) {
-        throw new Error('Network gateway manager required for network routing source');
+        throw new Error(
+          "Network gateway manager required for network routing source",
+        );
       }
       // Use ALL gateways from network for routing (sorted by stake, but not filtered)
       return networkManager.createRoutingProvider();
     }
 
-    case 'trusted-peers': {
+    case "trusted-peers": {
       const baseProvider = new TrustedPeersGatewaysProvider({
         trustedGateway: config.routing.trustedPeerGateway,
         logger: sdkLogger,
@@ -81,14 +83,16 @@ function createRoutingGatewaysProvider(
       });
     }
 
-    case 'static': {
+    case "static": {
       return {
         getGateways: async () => config.routing.staticGateways,
       };
     }
 
     default:
-      throw new Error(`Unknown routing gateway source: ${config.routing.gatewaySource}`);
+      throw new Error(
+        `Unknown routing gateway source: ${config.routing.gatewaySource}`,
+      );
   }
 }
 
@@ -106,22 +110,28 @@ function createVerificationGatewaysProvider(
   }
 
   switch (config.verification.gatewaySource) {
-    case 'top-staked': {
+    case "top-staked": {
       if (!networkManager) {
-        throw new Error('Network gateway manager required for top-staked verification source');
+        throw new Error(
+          "Network gateway manager required for top-staked verification source",
+        );
       }
       // Use top N staked gateways for verification
-      return networkManager.createVerificationProvider(config.verification.gatewayCount);
+      return networkManager.createVerificationProvider(
+        config.verification.gatewayCount,
+      );
     }
 
-    case 'static': {
+    case "static": {
       return {
         getGateways: async () => config.verification.staticGateways,
       };
     }
 
     default:
-      throw new Error(`Unknown verification gateway source: ${config.verification.gatewaySource}`);
+      throw new Error(
+        `Unknown verification gateway source: ${config.verification.gatewaySource}`,
+      );
   }
 }
 
@@ -136,7 +146,7 @@ function createRoutingStrategy(
   const sdkLogger = createSdkLogger(logger);
 
   switch (strategy) {
-    case 'fastest':
+    case "fastest":
       return new FastestPingRoutingStrategy({
         gatewaysProvider,
         logger: sdkLogger,
@@ -144,13 +154,13 @@ function createRoutingStrategy(
         maxConcurrency: 10,
       });
 
-    case 'random':
+    case "random":
       return new RandomRoutingStrategy({
         gatewaysProvider,
         logger: sdkLogger,
       });
 
-    case 'round-robin':
+    case "round-robin":
       return new RoundRobinRoutingStrategy({
         gatewaysProvider,
       });
@@ -217,7 +227,7 @@ class DynamicHashVerificationStrategy implements SdkVerificationStrategy {
     const gateways = await this.gatewaysProvider.getGateways();
 
     if (gateways.length === 0) {
-      throw new Error('No trusted gateways available for verification');
+      throw new Error("No trusted gateways available for verification");
     }
 
     // Cache gateways for the trustedGateways getter
@@ -240,8 +250,8 @@ class DynamicHashVerificationStrategy implements SdkVerificationStrategy {
  */
 function needsNetworkManager(config: RouterConfig): boolean {
   return (
-    config.routing.gatewaySource === 'network' ||
-    config.verification.gatewaySource === 'top-staked'
+    config.routing.gatewaySource === "network" ||
+    config.verification.gatewaySource === "top-staked"
   );
 }
 
@@ -275,10 +285,18 @@ export function createWayfinderServices(
   networkManager: NetworkGatewayManager | null,
 ): WayfinderServices {
   // Create routing gateways provider
-  const routingGatewaysProvider = createRoutingGatewaysProvider(config, logger, networkManager);
+  const routingGatewaysProvider = createRoutingGatewaysProvider(
+    config,
+    logger,
+    networkManager,
+  );
 
   // Create verification gateways provider (separate from routing)
-  const verificationGatewaysProvider = createVerificationGatewaysProvider(config, logger, networkManager);
+  const verificationGatewaysProvider = createVerificationGatewaysProvider(
+    config,
+    logger,
+    networkManager,
+  );
 
   // Create routing strategy
   const routingStrategy = createRoutingStrategy(
@@ -294,14 +312,15 @@ export function createWayfinderServices(
     logger,
   );
 
-  logger.info('Wayfinder services initialized', {
+  logger.info("Wayfinder services initialized", {
     routingGatewaySource: config.routing.gatewaySource,
     verificationGatewaySource: config.verification.gatewaySource,
     routingStrategy: config.routing.strategy,
     verificationEnabled: config.verification.enabled,
-    verificationGatewayCount: config.verification.gatewaySource === 'top-staked'
-      ? config.verification.gatewayCount
-      : config.verification.staticGateways.length,
+    verificationGatewayCount:
+      config.verification.gatewaySource === "top-staked"
+        ? config.verification.gatewayCount
+        : config.verification.staticGateways.length,
     usesNetworkManager: networkManager !== null,
   });
 

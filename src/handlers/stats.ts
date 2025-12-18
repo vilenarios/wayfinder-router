@@ -3,9 +3,9 @@
  * REST API for querying gateway telemetry and stats
  */
 
-import type { Context } from 'hono';
-import type { Logger } from '../types/index.js';
-import type { TelemetryService } from '../telemetry/service.js';
+import type { Context } from "hono";
+import type { Logger } from "../types/index.js";
+import type { TelemetryService } from "../telemetry/service.js";
 
 export interface StatsHandlerDeps {
   telemetryService: TelemetryService | null;
@@ -21,29 +21,29 @@ export function createGatewayStatsHandler(deps: StatsHandlerDeps) {
     const { telemetryService, logger } = deps;
 
     if (!telemetryService) {
-      return c.json({ error: 'Telemetry not enabled' }, 503);
+      return c.json({ error: "Telemetry not enabled" }, 503);
     }
 
     try {
       // Parse query parameters
-      const startHour = c.req.query('start');
-      const endHour = c.req.query('end');
+      const startHour = c.req.query("start");
+      const endHour = c.req.query("end");
 
       const stats = telemetryService.getGatewayStats(startHour, endHour);
 
       return c.json({
         period: {
-          start: startHour || 'last 24 hours',
-          end: endHour || 'now',
+          start: startHour || "last 24 hours",
+          end: endHour || "now",
         },
         gateways: stats,
         count: stats.length,
       });
     } catch (error) {
-      logger.error('Failed to get gateway stats', {
+      logger.error("Failed to get gateway stats", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return c.json({ error: 'Failed to retrieve stats' }, 500);
+      return c.json({ error: "Failed to retrieve stats" }, 500);
     }
   };
 }
@@ -57,13 +57,13 @@ export function createGatewayDetailHandler(deps: StatsHandlerDeps) {
     const { telemetryService, logger } = deps;
 
     if (!telemetryService) {
-      return c.json({ error: 'Telemetry not enabled' }, 503);
+      return c.json({ error: "Telemetry not enabled" }, 503);
     }
 
     try {
-      const gateway = decodeURIComponent(c.req.param('gateway'));
-      const startHour = c.req.query('start');
-      const endHour = c.req.query('end');
+      const gateway = decodeURIComponent(c.req.param("gateway"));
+      const startHour = c.req.query("start");
+      const endHour = c.req.query("end");
 
       const hourlyStats = telemetryService.getGatewayHourlyStats(
         gateway,
@@ -72,7 +72,7 @@ export function createGatewayDetailHandler(deps: StatsHandlerDeps) {
       );
 
       if (hourlyStats.length === 0) {
-        return c.json({ error: 'Gateway not found or no data', gateway }, 404);
+        return c.json({ error: "Gateway not found or no data", gateway }, 404);
       }
 
       // Calculate summary from hourly data
@@ -80,7 +80,8 @@ export function createGatewayDetailHandler(deps: StatsHandlerDeps) {
         (acc, hour) => ({
           totalRequests: acc.totalRequests + hour.totalRequests,
           successfulRequests: acc.successfulRequests + hour.successfulRequests,
-          verificationSuccess: acc.verificationSuccess + hour.verificationSuccess,
+          verificationSuccess:
+            acc.verificationSuccess + hour.verificationSuccess,
           verificationFailed: acc.verificationFailed + hour.verificationFailed,
           bytesServed: acc.bytesServed + hour.bytesServed,
           latencySum: acc.latencySum + hour.latencySum,
@@ -100,8 +101,8 @@ export function createGatewayDetailHandler(deps: StatsHandlerDeps) {
       return c.json({
         gateway,
         period: {
-          start: startHour || 'last 24 hours',
-          end: endHour || 'now',
+          start: startHour || "last 24 hours",
+          end: endHour || "now",
         },
         summary: {
           ...summary,
@@ -117,10 +118,10 @@ export function createGatewayDetailHandler(deps: StatsHandlerDeps) {
         hourlyStats,
       });
     } catch (error) {
-      logger.error('Failed to get gateway detail', {
+      logger.error("Failed to get gateway detail", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return c.json({ error: 'Failed to retrieve gateway stats' }, 500);
+      return c.json({ error: "Failed to retrieve gateway stats" }, 500);
     }
   };
 }
@@ -134,20 +135,20 @@ export function createRewardExportHandler(deps: StatsHandlerDeps) {
     const { telemetryService, logger } = deps;
 
     if (!telemetryService) {
-      return c.json({ error: 'Telemetry not enabled' }, 503);
+      return c.json({ error: "Telemetry not enabled" }, 503);
     }
 
     try {
-      const startHour = c.req.query('start');
-      const endHour = c.req.query('end');
-      const format = c.req.query('format') || 'json';
+      const startHour = c.req.query("start");
+      const endHour = c.req.query("end");
+      const format = c.req.query("format") || "json";
 
       const exportData = telemetryService.exportRewardData(startHour, endHour);
 
-      if (format === 'csv') {
+      if (format === "csv") {
         // CSV format for easy import
         const csvLines = [
-          'gateway,total_requests,successful_requests,bytes_served,success_rate,verification_success_rate,avg_latency_ms,availability_rate',
+          "gateway,total_requests,successful_requests,bytes_served,success_rate,verification_success_rate,avg_latency_ms,availability_rate",
         ];
 
         for (const gw of exportData.gateways) {
@@ -161,24 +162,24 @@ export function createRewardExportHandler(deps: StatsHandlerDeps) {
               gw.verificationSuccessRate.toFixed(4),
               gw.avgLatencyMs.toFixed(2),
               gw.availabilityRate.toFixed(4),
-            ].join(','),
+            ].join(","),
           );
         }
 
-        return new Response(csvLines.join('\n'), {
+        return new Response(csvLines.join("\n"), {
           headers: {
-            'Content-Type': 'text/csv',
-            'Content-Disposition': `attachment; filename="gateway-stats-${exportData.period.start}-${exportData.period.end}.csv"`,
+            "Content-Type": "text/csv",
+            "Content-Disposition": `attachment; filename="gateway-stats-${exportData.period.start}-${exportData.period.end}.csv"`,
           },
         });
       }
 
       return c.json(exportData);
     } catch (error) {
-      logger.error('Failed to export reward data', {
+      logger.error("Failed to export reward data", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return c.json({ error: 'Failed to export data' }, 500);
+      return c.json({ error: "Failed to export data" }, 500);
     }
   };
 }
@@ -192,7 +193,7 @@ export function createGatewayListHandler(deps: StatsHandlerDeps) {
     const { telemetryService } = deps;
 
     if (!telemetryService) {
-      return c.json({ error: 'Telemetry not enabled' }, 503);
+      return c.json({ error: "Telemetry not enabled" }, 503);
     }
 
     const gateways = telemetryService.getKnownGateways();
@@ -208,7 +209,9 @@ export function createGatewayListHandler(deps: StatsHandlerDeps) {
  * Create handler for enhanced /metrics endpoint
  * Returns Prometheus metrics including gateway-specific metrics
  */
-export function createEnhancedMetricsHandler(deps: StatsHandlerDeps & { baseMetrics: string }) {
+export function createEnhancedMetricsHandler(
+  deps: StatsHandlerDeps & { baseMetrics: string },
+) {
   return async (_c: Context): Promise<Response> => {
     const { telemetryService, baseMetrics } = deps;
 
@@ -222,7 +225,7 @@ export function createEnhancedMetricsHandler(deps: StatsHandlerDeps & { baseMetr
     return new Response(metrics, {
       status: 200,
       headers: {
-        'Content-Type': 'text/plain; version=0.0.4',
+        "Content-Type": "text/plain; version=0.0.4",
       },
     });
   };

@@ -6,12 +6,12 @@
 import type {
   RoutingStrategy as SdkRoutingStrategy,
   GatewaysProvider,
-} from '@ar.io/wayfinder-core';
+} from "@ar.io/wayfinder-core";
 
-import type { Logger, RouterConfig } from '../types/index.js';
-import { GatewayHealthCache } from '../cache/gateway-health.js';
-import { NoHealthyGatewaysError } from '../middleware/error-handler.js';
-import { sandboxFromTxId } from '../utils/url.js';
+import type { Logger, RouterConfig } from "../types/index.js";
+import { GatewayHealthCache } from "../cache/gateway-health.js";
+import { NoHealthyGatewaysError } from "../middleware/error-handler.js";
+import { sandboxFromTxId } from "../utils/url.js";
 
 export interface GatewaySelectorOptions {
   routingStrategy: SdkRoutingStrategy;
@@ -72,7 +72,7 @@ export class GatewaySelector {
     // If no healthy gateways, clear cache and try all
     if (healthyGateways.length === 0) {
       this.logger.warn(
-        'All gateways marked unhealthy, clearing health cache and retrying',
+        "All gateways marked unhealthy, clearing health cache and retrying",
       );
       this.healthCache.clear();
       healthyGateways = allGateways;
@@ -81,7 +81,7 @@ export class GatewaySelector {
     // Compute subdomain for routing
     const subdomain = txId ? sandboxFromTxId(txId) : arnsName?.toLowerCase();
 
-    this.logger.debug('Selecting gateway', {
+    this.logger.debug("Selecting gateway", {
       totalGateways: allGateways.length,
       healthyGateways: healthyGateways.length,
       subdomain,
@@ -95,11 +95,11 @@ export class GatewaySelector {
       try {
         const gateway = await this.routingStrategy.selectGateway({
           gateways: healthyGateways,
-          path: path || '/',
+          path: path || "/",
           subdomain,
         });
 
-        this.logger.debug('Gateway selected', {
+        this.logger.debug("Gateway selected", {
           gateway: gateway.toString(),
           attempt: attempt + 1,
         });
@@ -108,7 +108,7 @@ export class GatewaySelector {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        this.logger.warn('Gateway selection attempt failed', {
+        this.logger.warn("Gateway selection attempt failed", {
           attempt: attempt + 1,
           maxAttempts: this.retryAttempts,
           error: lastError.message,
@@ -128,14 +128,14 @@ export class GatewaySelector {
   /**
    * Select a gateway specifically for a transaction ID
    */
-  async selectForTransaction(txId: string, path: string = '/'): Promise<URL> {
+  async selectForTransaction(txId: string, path: string = "/"): Promise<URL> {
     return this.select({ txId, path });
   }
 
   /**
    * Select a gateway specifically for an ArNS name
    */
-  async selectForArns(arnsName: string, path: string = '/'): Promise<URL> {
+  async selectForArns(arnsName: string, path: string = "/"): Promise<URL> {
     return this.select({ arnsName, path });
   }
 

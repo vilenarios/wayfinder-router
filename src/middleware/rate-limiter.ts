@@ -3,8 +3,8 @@
  * IP-based rate limiting with configurable window and limits
  */
 
-import type { Context, Next } from 'hono';
-import type { RouterConfig } from '../types/index.js';
+import type { Context, Next } from "hono";
+import type { RouterConfig } from "../types/index.js";
 
 interface RateLimitEntry {
   count: number;
@@ -58,20 +58,20 @@ const store = new RateLimitStore();
  */
 function getClientIp(c: Context): string {
   // Check common proxy headers
-  const xForwardedFor = c.req.header('x-forwarded-for');
+  const xForwardedFor = c.req.header("x-forwarded-for");
   if (xForwardedFor) {
     // Take the first IP in the chain (original client)
-    return xForwardedFor.split(',')[0].trim();
+    return xForwardedFor.split(",")[0].trim();
   }
 
-  const xRealIp = c.req.header('x-real-ip');
+  const xRealIp = c.req.header("x-real-ip");
   if (xRealIp) {
     return xRealIp.trim();
   }
 
   // Fall back to direct connection IP
   // Note: This may not work correctly behind a proxy
-  return 'unknown';
+  return "unknown";
 }
 
 /**
@@ -83,9 +83,9 @@ function addRateLimitHeaders(
   remaining: number,
   resetAt: number,
 ): void {
-  c.header('X-RateLimit-Limit', String(limit));
-  c.header('X-RateLimit-Remaining', String(Math.max(0, remaining)));
-  c.header('X-RateLimit-Reset', String(Math.floor(resetAt / 1000)));
+  c.header("X-RateLimit-Limit", String(limit));
+  c.header("X-RateLimit-Remaining", String(Math.max(0, remaining)));
+  c.header("X-RateLimit-Reset", String(Math.floor(resetAt / 1000)));
 }
 
 /**
@@ -102,7 +102,7 @@ export function createRateLimitMiddleware(config: RouterConfig) {
 
     // Skip rate limiting for health check endpoints
     const path = new URL(c.req.url).pathname;
-    if (path === '/health' || path === '/ready' || path === '/metrics') {
+    if (path === "/health" || path === "/ready" || path === "/metrics") {
       return next();
     }
 
@@ -132,12 +132,12 @@ export function createRateLimitMiddleware(config: RouterConfig) {
     // Check if limit exceeded
     if (entry.count > maxRequests) {
       const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
-      c.header('Retry-After', String(retryAfter));
+      c.header("Retry-After", String(retryAfter));
 
       return c.json(
         {
-          error: 'RATE_LIMITED',
-          message: 'Too many requests',
+          error: "RATE_LIMITED",
+          message: "Too many requests",
           retryAfter,
         },
         429,

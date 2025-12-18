@@ -3,17 +3,14 @@
  * Resilient fetch with retry logic and gateway failover
  */
 
-import type { Logger, RouterConfig } from '../types/index.js';
-import type { GatewaySelector } from './gateway-selector.js';
-import {
-  constructGatewayUrl,
-  constructArnsGatewayUrl,
-} from '../utils/url.js';
+import type { Logger, RouterConfig } from "../types/index.js";
+import type { GatewaySelector } from "./gateway-selector.js";
+import { constructGatewayUrl, constructArnsGatewayUrl } from "../utils/url.js";
 import {
   createGatewayRequestHeaders,
   filterGatewayResponseHeaders,
-} from '../utils/headers.js';
-import { GatewayError } from '../middleware/error-handler.js';
+} from "../utils/headers.js";
+import { GatewayError } from "../middleware/error-handler.js";
 
 export interface ContentFetcherOptions {
   gatewaySelector: GatewaySelector;
@@ -82,7 +79,7 @@ export class ContentFetcher {
           useSubdomain: true,
         });
 
-        this.logger.debug('Fetching from gateway', {
+        this.logger.debug("Fetching from gateway", {
           gateway: gateway.toString(),
           gatewayUrl: gatewayUrl.toString(),
           txId,
@@ -97,9 +94,9 @@ export class ContentFetcher {
 
         // Fetch from gateway with timeout
         const response = await fetch(gatewayUrl.toString(), {
-          method: 'GET',
+          method: "GET",
           headers: requestHeaders,
-          redirect: 'follow',
+          redirect: "follow",
           signal: AbortSignal.timeout(30000), // 30 second timeout
         });
 
@@ -117,11 +114,11 @@ export class ContentFetcher {
         // Filter response headers
         const filteredHeaders = filterGatewayResponseHeaders(response.headers);
 
-        this.logger.debug('Content fetched successfully', {
+        this.logger.debug("Content fetched successfully", {
           gateway: gateway.toString(),
           txId,
-          contentType: response.headers.get('content-type'),
-          contentLength: response.headers.get('content-length'),
+          contentType: response.headers.get("content-type"),
+          contentLength: response.headers.get("content-length"),
         });
 
         return {
@@ -137,7 +134,7 @@ export class ContentFetcher {
           this.gatewaySelector.recordFailure(lastGateway);
         }
 
-        this.logger.warn('Fetch attempt failed', {
+        this.logger.warn("Fetch attempt failed", {
           txId,
           gateway: lastGateway?.toString(),
           attempt: attempt + 1,
@@ -156,8 +153,8 @@ export class ContentFetcher {
     throw (
       lastError ||
       new GatewayError(
-        lastGateway?.toString() || 'unknown',
-        'All fetch attempts failed',
+        lastGateway?.toString() || "unknown",
+        "All fetch attempts failed",
       )
     );
   }
@@ -174,7 +171,10 @@ export class ContentFetcher {
     for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
       try {
         // Select a gateway
-        const gateway = await this.gatewaySelector.selectForArns(arnsName, path);
+        const gateway = await this.gatewaySelector.selectForArns(
+          arnsName,
+          path,
+        );
         lastGateway = gateway;
 
         // For ArNS, we use the arnsName as subdomain
@@ -184,7 +184,7 @@ export class ContentFetcher {
           path,
         });
 
-        this.logger.debug('Fetching ArNS content from gateway', {
+        this.logger.debug("Fetching ArNS content from gateway", {
           gateway: gateway.toString(),
           gatewayUrl: gatewayUrl.toString(),
           arnsName,
@@ -200,9 +200,9 @@ export class ContentFetcher {
 
         // Fetch from gateway with timeout
         const response = await fetch(gatewayUrl.toString(), {
-          method: 'GET',
+          method: "GET",
           headers: requestHeaders,
-          redirect: 'follow',
+          redirect: "follow",
           signal: AbortSignal.timeout(30000), // 30 second timeout
         });
 
@@ -220,11 +220,11 @@ export class ContentFetcher {
         // Filter response headers
         const filteredHeaders = filterGatewayResponseHeaders(response.headers);
 
-        this.logger.debug('ArNS content fetched successfully', {
+        this.logger.debug("ArNS content fetched successfully", {
           gateway: gateway.toString(),
           arnsName,
           resolvedTxId,
-          contentType: response.headers.get('content-type'),
+          contentType: response.headers.get("content-type"),
         });
 
         return {
@@ -240,7 +240,7 @@ export class ContentFetcher {
           this.gatewaySelector.recordFailure(lastGateway);
         }
 
-        this.logger.warn('ArNS fetch attempt failed', {
+        this.logger.warn("ArNS fetch attempt failed", {
           arnsName,
           gateway: lastGateway?.toString(),
           attempt: attempt + 1,
@@ -259,8 +259,8 @@ export class ContentFetcher {
     throw (
       lastError ||
       new GatewayError(
-        lastGateway?.toString() || 'unknown',
-        'All ArNS fetch attempts failed',
+        lastGateway?.toString() || "unknown",
+        "All ArNS fetch attempts failed",
       )
     );
   }

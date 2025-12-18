@@ -3,8 +3,8 @@
  * Caches ArNS name → transaction ID mappings with TTL
  */
 
-import { LRUCache } from 'lru-cache';
-import type { ArnsResolution, Logger } from '../types/index.js';
+import { LRUCache } from "lru-cache";
+import type { ArnsResolution, Logger } from "../types/index.js";
 
 export interface ArnsCacheOptions {
   maxSize?: number;
@@ -39,11 +39,11 @@ export class ArnsCache {
     const resolution = this.cache.get(normalized);
 
     if (resolution) {
-      this.logger?.debug('ArNS cache hit', { arnsName: normalized });
+      this.logger?.debug("ArNS cache hit", { arnsName: normalized });
       return resolution;
     }
 
-    this.logger?.debug('ArNS cache miss', { arnsName: normalized });
+    this.logger?.debug("ArNS cache miss", { arnsName: normalized });
     return null;
   }
 
@@ -56,7 +56,7 @@ export class ArnsCache {
 
     this.cache.set(normalized, resolution, { ttl });
 
-    this.logger?.debug('ArNS cached', {
+    this.logger?.debug("ArNS cached", {
       arnsName: normalized,
       txId: resolution.txId,
       ttlMs: ttl,
@@ -69,7 +69,7 @@ export class ArnsCache {
   invalidate(arnsName: string): void {
     const normalized = arnsName.toLowerCase();
     this.cache.delete(normalized);
-    this.logger?.debug('ArNS cache invalidated', { arnsName: normalized });
+    this.logger?.debug("ArNS cache invalidated", { arnsName: normalized });
   }
 
   /**
@@ -77,7 +77,7 @@ export class ArnsCache {
    */
   clear(): void {
     this.cache.clear();
-    this.logger?.debug('ArNS cache cleared');
+    this.logger?.debug("ArNS cache cleared");
   }
 
   /**
