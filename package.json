@@ -1,0 +1,46 @@
+{
+  "name": "@ar.io/wayfinder-router",
+  "version": "0.1.0",
+  "description": "Lightweight proxy router for ar.io network gateways with verification",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "arweave",
+    "ar.io",
+    "gateway",
+    "proxy",
+    "router",
+    "wayfinder"
+  ],
+  "author": "AR.IO",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@ar.io/sdk": "^3.0.0",
+    "@ar.io/wayfinder-core": "file:../wayfinder/packages/wayfinder-core",
+    "@hono/node-server": "^1.13.7",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^17.2.3",
+    "hono": "^4.6.0",
+    "lru-cache": "^11.0.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,83 @@
+# Wayfinder Router Docker Compose
+# Development and production configurations
+
+services:
+  wayfinder-router:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wayfinder-router
+    ports:
+      - "3000:3000"
+    environment:
+      # Server
+      - PORT=3000
+      - HOST=0.0.0.0
+      - BASE_DOMAIN=${BASE_DOMAIN:-localhost}
+
+      # Mode
+      - DEFAULT_MODE=${DEFAULT_MODE:-proxy}
+      - ALLOW_MODE_OVERRIDE=${ALLOW_MODE_OVERRIDE:-true}
+
+      # Verification
+      - VERIFICATION_ENABLED=${VERIFICATION_ENABLED:-true}
+      - VERIFICATION_STRICT=${VERIFICATION_STRICT:-false}
+      - TRUSTED_GATEWAYS=${TRUSTED_GATEWAYS:-https://arweave.net,https://ar-io.dev}
+      - ARNS_CONSENSUS_THRESHOLD=${ARNS_CONSENSUS_THRESHOLD:-2}
+
+      # Routing
+      - ROUTING_STRATEGY=${ROUTING_STRATEGY:-fastest}
+      - GATEWAY_SOURCE=${GATEWAY_SOURCE:-trusted-peers}
+      - TRUSTED_PEER_GATEWAY=${TRUSTED_PEER_GATEWAY:-https://arweave.net}
+
+      # Resilience
+      - RETRY_ATTEMPTS=${RETRY_ATTEMPTS:-3}
+      - RETRY_DELAY_MS=${RETRY_DELAY_MS:-100}
+      - GATEWAY_HEALTH_TTL_MS=${GATEWAY_HEALTH_TTL_MS:-300000}
+
+      # Cache
+      - ARNS_CACHE_TTL_MS=${ARNS_CACHE_TTL_MS:-300000}
+      - CONTENT_CACHE_ENABLED=${CONTENT_CACHE_ENABLED:-false}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - NODE_ENV=${NODE_ENV:-production}
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+    restart: unless-stopped
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+
+  # Development service with hot reload
+  wayfinder-router-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: wayfinder-router-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/app/src:ro
+      - ./package.json:/app/package.json:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+    environment:
+      - LOG_LEVEL=debug
+      - BASE_DOMAIN=localhost
+      - VERIFICATION_ENABLED=true
+      - VERIFICATION_STRICT=false
+    profiles:
+      - dev

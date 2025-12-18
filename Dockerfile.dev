@@ -1,0 +1,26 @@
+# Wayfinder Router Development Dockerfile
+# Includes hot reload support
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies for hot reload
+RUN npm install -g tsx
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev)
+RUN npm ci
+
+# Copy TypeScript config
+COPY tsconfig.json ./
+
+# Source will be mounted as volume
+# COPY src ./src
+
+EXPOSE 3000
+
+# Start with hot reload
+CMD ["npm", "run", "dev"]
