@@ -290,7 +290,7 @@ export class NetworkGatewayManager {
         limit: 1000,
       });
 
-      if (!result.items || result.items.length === 0) {
+      if (result.items === undefined || result.items.length === 0) {
         throw new Error("No gateways returned from ar.io network");
       }
 

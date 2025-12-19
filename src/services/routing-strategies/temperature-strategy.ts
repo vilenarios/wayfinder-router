@@ -62,7 +62,7 @@ export class TemperatureRoutingStrategy implements SdkRoutingStrategy {
     let gateways = params.gateways;
 
     // If no gateways provided, fetch from provider
-    if (!gateways || gateways.length === 0) {
+    if (gateways.length === 0) {
       gateways = await this.gatewaysProvider.getGateways();
     }
 

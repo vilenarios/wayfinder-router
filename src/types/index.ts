@@ -107,6 +107,8 @@ export interface RouterConfig {
     circuitBreakerResetMs: number;
     /** Maximum entries in gateway health cache (prevents memory leaks) */
     gatewayHealthMaxEntries: number;
+    /** Timeout for stream reads (per-chunk, prevents zombie connections) */
+    streamTimeoutMs: number;
   };
 
   cache: {
@@ -164,6 +166,26 @@ export interface RouterConfig {
     exitOnUncaughtException: boolean;
     /** Grace period before forced exit to allow logs to flush (ms) */
     exitGracePeriodMs: number;
+  };
+
+  // Shutdown settings
+  shutdown: {
+    /** Grace period for requests to drain (ms) */
+    drainTimeoutMs: number;
+    /** Total shutdown timeout before force exit (ms) */
+    shutdownTimeoutMs: number;
+  };
+
+  // HTTP connection pool settings
+  http: {
+    /** Maximum connections per gateway host */
+    connectionsPerHost: number;
+    /** Connection timeout in ms (TCP handshake) */
+    connectTimeoutMs: number;
+    /** Request timeout in ms (entire request lifecycle) */
+    requestTimeoutMs: number;
+    /** Keep-alive timeout in ms */
+    keepAliveTimeoutMs: number;
   };
 }
 

@@ -6,6 +6,7 @@
 import type { Logger, RouterConfig } from "../types/index.js";
 import type { GatewaySelector } from "./gateway-selector.js";
 import type { GatewayTemperatureCache } from "../cache/gateway-temperature.js";
+import type { HttpClient } from "../http/http-client.js";
 import { constructGatewayUrl, constructArnsGatewayUrl } from "../utils/url.js";
 import {
   createGatewayRequestHeaders,
@@ -17,9 +18,13 @@ export interface ContentFetcherOptions {
   gatewaySelector: GatewaySelector;
   retryAttempts: number;
   retryDelayMs: number;
+  /** Request timeout in ms */
+  requestTimeoutMs: number;
   logger: Logger;
   /** Optional temperature cache for performance tracking */
   temperatureCache?: GatewayTemperatureCache;
+  /** Optional HTTP client with connection pooling */
+  httpClient?: HttpClient;
 }
 
 export interface FetchResult {
@@ -47,15 +52,39 @@ export class ContentFetcher {
   private gatewaySelector: GatewaySelector;
   private retryAttempts: number;
   private retryDelayMs: number;
+  private requestTimeoutMs: number;
   private logger: Logger;
   private temperatureCache?: GatewayTemperatureCache;
+  private httpClient?: HttpClient;
 
   constructor(options: ContentFetcherOptions) {
     this.gatewaySelector = options.gatewaySelector;
     this.retryAttempts = options.retryAttempts;
     this.retryDelayMs = options.retryDelayMs;
+    this.requestTimeoutMs = options.requestTimeoutMs;
     this.logger = options.logger;
     this.temperatureCache = options.temperatureCache;
+    this.httpClient = options.httpClient;
+  }
+
+  /**
+   * Fetch with connection pooling if available, otherwise use native fetch
+   */
+  private async doFetch(
+    url: string,
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+    },
+  ): Promise<Response> {
+    if (this.httpClient) {
+      return this.httpClient.fetch(url, options);
+    }
+    return fetch(url, {
+      ...options,
+      redirect: "follow",
+    });
   }
 
   /**
@@ -95,6 +124,7 @@ export class ContentFetcher {
           txId,
           attempt: attempt + 1,
           triedGateways: triedGateways.length,
+          pooled: !!this.httpClient,
         });
 
         // Create request headers
@@ -103,12 +133,17 @@ export class ContentFetcher {
           traceId,
         });
 
-        // Fetch from gateway with timeout
-        const response = await fetch(gatewayUrl.toString(), {
+        // Convert Headers to plain object for HttpClient compatibility
+        const headersObj: Record<string, string> = {};
+        requestHeaders.forEach((value, key) => {
+          headersObj[key] = value;
+        });
+
+        // Fetch from gateway with timeout (using connection pool if available)
+        const response = await this.doFetch(gatewayUrl.toString(), {
           method: "GET",
-          headers: requestHeaders,
-          redirect: "follow",
-          signal: AbortSignal.timeout(30000), // 30 second timeout
+          headers: headersObj,
+          signal: AbortSignal.timeout(this.requestTimeoutMs),
         });
 
         if (!response.ok) {
@@ -215,6 +250,7 @@ export class ContentFetcher {
           resolvedTxId,
           attempt: attempt + 1,
           triedGateways: triedGateways.length,
+          pooled: !!this.httpClient,
         });
 
         // Create request headers
@@ -223,12 +259,17 @@ export class ContentFetcher {
           traceId,
         });
 
-        // Fetch from gateway with timeout
-        const response = await fetch(gatewayUrl.toString(), {
+        // Convert Headers to plain object for HttpClient compatibility
+        const headersObj: Record<string, string> = {};
+        requestHeaders.forEach((value, key) => {
+          headersObj[key] = value;
+        });
+
+        // Fetch from gateway with timeout (using connection pool if available)
+        const response = await this.doFetch(gatewayUrl.toString(), {
           method: "GET",
-          headers: requestHeaders,
-          redirect: "follow",
-          signal: AbortSignal.timeout(30000), // 30 second timeout
+          headers: headersObj,
+          signal: AbortSignal.timeout(this.requestTimeoutMs),
         });
 
         if (!response.ok) {
@@ -314,12 +355,15 @@ export function createContentFetcher(
   config: RouterConfig,
   logger: Logger,
   temperatureCache?: GatewayTemperatureCache,
+  httpClient?: HttpClient,
 ): ContentFetcher {
   return new ContentFetcher({
     gatewaySelector,
     retryAttempts: config.routing.retryAttempts,
     retryDelayMs: config.routing.retryDelayMs,
+    requestTimeoutMs: config.http.requestTimeoutMs,
     logger,
     temperatureCache,
+    httpClient,
   });
 }

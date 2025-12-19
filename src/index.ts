@@ -10,6 +10,7 @@ import pino from "pino";
 import { loadConfig, validateConfig } from "./config.js";
 import { createServer } from "./server.js";
 import type { Logger, RouterConfig } from "./types/index.js";
+import { createShutdownManager } from "./utils/shutdown-manager.js";
 
 /**
  * Create pino logger with configuration
@@ -199,43 +200,42 @@ async function main() {
     });
   }
 
-  // Graceful shutdown
-  const shutdown = async (signal: string) => {
-    logger.info("Shutdown signal received", { signal });
+  // Setup graceful shutdown with request draining
+  createShutdownManager({
+    server,
+    requestTracker: services.requestTracker,
+    logger,
+    drainTimeoutMs: config.shutdown.drainTimeoutMs,
+    shutdownTimeoutMs: config.shutdown.shutdownTimeoutMs,
+    onBeforeServerClose: async () => {
+      // Stop ping service first (it depends on network manager)
+      if (services.pingService) {
+        logger.info("Stopping gateway ping service");
+        services.pingService.stop();
+      }
 
-    // Stop ping service first (it depends on network manager)
-    if (services.pingService) {
-      logger.info("Stopping gateway ping service");
-      services.pingService.stop();
-    }
+      // Stop network gateway manager
+      if (services.networkGatewayManager) {
+        logger.info("Stopping network gateway manager");
+        services.networkGatewayManager.stop();
+      }
 
-    // Stop network gateway manager
-    if (services.networkGatewayManager) {
-      logger.info("Stopping network gateway manager");
-      services.networkGatewayManager.stop();
-    }
+      // Stop telemetry service to flush pending events and close database
+      if (services.telemetryService) {
+        logger.info("Stopping telemetry service");
+        services.telemetryService.stop();
+      }
 
-    // Stop telemetry service to flush pending events and close database
-    if (services.telemetryService) {
-      logger.info("Stopping telemetry service");
-      services.telemetryService.stop();
-    }
+      // Close HTTP connection pools
+      logger.info("Closing HTTP connection pools");
+      await services.httpClient.close();
+    },
+  });
 
-    // Close server
-    server.close(() => {
-      logger.info("Server closed");
-      process.exit(0);
-    });
-
-    // Force exit after timeout
-    setTimeout(() => {
-      logger.warn("Forced shutdown after timeout");
-      process.exit(1);
-    }, 10_000);
-  };
-
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  logger.info("Graceful shutdown manager initialized", {
+    drainTimeoutMs: config.shutdown.drainTimeoutMs,
+    shutdownTimeoutMs: config.shutdown.shutdownTimeoutMs,
+  });
 }
 
 // Run

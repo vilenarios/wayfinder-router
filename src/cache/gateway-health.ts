@@ -184,18 +184,51 @@ export class GatewayHealthCache {
   }
 
   /**
-   * Periodically prune stale entries to prevent unbounded memory growth.
+   * Calculate eviction priority for a gateway entry.
+   * Higher score = more important to keep.
+   *
+   * Priority order (highest to lowest):
+   * 3 - Active circuit breaker (unhealthy, circuit open)
+   * 2 - Unhealthy but circuit expired
+   * 1 - Healthy with some failures (recovering)
+   * 0 - Fully healthy (safe to evict, will be assumed healthy anyway)
+   */
+  private evictionPriority(state: GatewayHealth): number {
+    const now = Date.now();
+
+    // Open circuit breaker = highest priority to keep
+    if (state.circuitOpen && state.circuitOpenUntil > now) {
+      return 3;
+    }
+
+    // Unhealthy but circuit expired = medium priority
+    if (!state.healthy) {
+      return 2;
+    }
+
+    // Healthy with some failures = recovering, low priority
+    if (state.failures > 0) {
+      return 1;
+    }
+
+    // Fully healthy, no failures = lowest priority to keep
+    return 0;
+  }
+
+  /**
+   * Prune stale entries and enforce max gateway limit.
+   * Called periodically during recordFailure and markUnhealthy operations.
    */
   private maybePrune(): void {
     const now = Date.now();
 
-    // Only prune once per healthTtlMs period
+    // Only prune periodically (every healthTtlMs)
     if (now - this.lastPruneTime < this.healthTtlMs) {
       return;
     }
     this.lastPruneTime = now;
 
-    // Remove expired entries
+    // Phase 1: Remove completely stale entries (older than 2x TTL)
     const staleThreshold = this.healthTtlMs * 2;
     let pruned = 0;
 
@@ -206,20 +239,31 @@ export class GatewayHealthCache {
       }
     }
 
-    // If still over max, remove oldest entries
+    // Phase 2: If still over limit, evict by priority
     if (this.health.size > this.maxGateways) {
-      const entries = [...this.health.entries()].sort(
-        (a, b) => a[1].lastChecked - b[1].lastChecked,
-      );
+      const entries = [...this.health.entries()]
+        .map(([key, state]) => ({
+          key,
+          state,
+          priority: this.evictionPriority(state),
+        }))
+        // Sort by priority (ascending), then by lastChecked (ascending = oldest first)
+        .sort((a, b) => {
+          if (a.priority !== b.priority) {
+            return a.priority - b.priority; // Lower priority evicted first
+          }
+          return a.state.lastChecked - b.state.lastChecked; // Older evicted first
+        });
+
       const toRemove = entries.slice(0, this.health.size - this.maxGateways);
-      for (const [key] of toRemove) {
+      for (const { key } of toRemove) {
         this.health.delete(key);
         pruned++;
       }
     }
 
     if (pruned > 0) {
-      this.logger?.debug("Pruned stale gateway health entries", {
+      this.logger?.debug("Pruned gateway health entries", {
         pruned,
         remaining: this.health.size,
       });
@@ -234,6 +278,7 @@ export class GatewayHealthCache {
     healthy: number;
     unhealthy: number;
     circuitOpen: number;
+    maxGateways: number;
   } {
     let healthy = 0;
     let unhealthy = 0;
@@ -250,6 +295,7 @@ export class GatewayHealthCache {
       healthy,
       unhealthy,
       circuitOpen,
+      maxGateways: this.maxGateways,
     };
   }
 }

@@ -200,7 +200,7 @@ export class ManifestResolver {
       const indexPath = normalizeManifestPath(manifest.index.path);
       const indexEntry = manifest.paths[indexPath];
 
-      if (!indexEntry) {
+      if (indexEntry === undefined) {
         throw new ManifestPathNotFoundError(manifestTxId, manifest.index.path);
       }
 
@@ -216,7 +216,7 @@ export class ManifestResolver {
     let entry = manifest.paths[normalizedPath];
     let resolvedPath = normalizedPath;
 
-    if (!entry) {
+    if (entry === undefined) {
       // Try with and without leading slash
       const altPath = normalizedPath.startsWith("/")
         ? normalizedPath.slice(1)
@@ -225,7 +225,7 @@ export class ManifestResolver {
       resolvedPath = altPath;
     }
 
-    if (!entry) {
+    if (entry === undefined) {
       // Use fallback if available
       if (manifest.fallback?.id) {
         this.logger.debug("Path not found, using manifest fallback", {

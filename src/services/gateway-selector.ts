@@ -19,6 +19,8 @@ export interface GatewaySelectorOptions {
   healthTtlMs: number;
   circuitBreakerThreshold: number;
   circuitBreakerResetMs: number;
+  /** Maximum entries in gateway health cache (prevents memory leaks) */
+  maxGateways: number;
   retryAttempts: number;
   retryDelayMs: number;
   logger: Logger;
@@ -51,6 +53,7 @@ export class GatewaySelector {
       healthTtlMs: options.healthTtlMs,
       circuitBreakerThreshold: options.circuitBreakerThreshold,
       circuitBreakerResetMs: options.circuitBreakerResetMs,
+      maxGateways: options.maxGateways,
       logger: options.logger,
     });
   }
@@ -239,6 +242,7 @@ export function createGatewaySelector(
     healthTtlMs: config.resilience.gatewayHealthTtlMs,
     circuitBreakerThreshold: config.resilience.circuitBreakerThreshold,
     circuitBreakerResetMs: config.resilience.circuitBreakerResetMs,
+    maxGateways: config.resilience.gatewayHealthMaxEntries,
     retryAttempts: config.routing.retryAttempts,
     retryDelayMs: config.routing.retryDelayMs,
     logger,

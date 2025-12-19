@@ -17,6 +17,9 @@ import { createRequestParserMiddleware } from "./middleware/request-parser.js";
 import { createModeSelectorMiddleware } from "./middleware/mode-selector.js";
 import { createRateLimitMiddleware } from "./middleware/rate-limiter.js";
 import { createErrorResponse } from "./middleware/error-handler.js";
+import { requestTrackingMiddleware } from "./middleware/request-tracking.js";
+import { RequestTracker } from "./utils/request-tracker.js";
+import { HttpClient, createHttpClient } from "./http/http-client.js";
 
 import {
   createWayfinderServices,
@@ -84,6 +87,10 @@ export interface RouterServices {
   wayfinderServices: WayfinderServices;
   networkGatewayManager: NetworkGatewayManager | null;
   pingService: GatewayPingService | null;
+  /** Request tracker for graceful shutdown */
+  requestTracker: RequestTracker;
+  /** HTTP client with connection pooling */
+  httpClient: HttpClient;
 }
 
 export interface CreateServerOptions {
@@ -97,6 +104,23 @@ export interface CreateServerOptions {
 export function createServer(options: CreateServerOptions) {
   const { config, logger } = options;
   const startTime = Date.now();
+
+  // Create request tracker for graceful shutdown
+  const requestTracker = new RequestTracker({ logger });
+
+  // Create HTTP client with connection pooling for content fetching
+  const httpClient = createHttpClient({
+    connectionsPerHost: config.http.connectionsPerHost,
+    connectTimeoutMs: config.http.connectTimeoutMs,
+    keepAliveTimeoutMs: config.http.keepAliveTimeoutMs,
+    logger,
+  });
+
+  logger.info("HTTP client with connection pooling created", {
+    connectionsPerHost: config.http.connectionsPerHost,
+    connectTimeoutMs: config.http.connectTimeoutMs,
+    keepAliveTimeoutMs: config.http.keepAliveTimeoutMs,
+  });
 
   // Create network gateway manager if needed (for network/top-staked sources)
   const networkGatewayManager = createNetworkManager(config, logger);
@@ -130,13 +154,15 @@ export function createServer(options: CreateServerOptions) {
     logger,
   );
 
-  // Pass temperature cache to content fetcher for performance tracking
-  // (only used when routing strategy is "temperature")
+  // Pass temperature cache and HTTP client to content fetcher for performance tracking
+  // (temperature cache only used when routing strategy is "temperature")
+  // (HTTP client provides connection pooling for efficient gateway requests)
   const contentFetcher = createContentFetcher(
     gatewaySelector,
     config,
     logger,
     wayfinderServices.temperatureCache ?? undefined,
+    httpClient,
   );
 
   // Initialize manifest resolver for verifying path manifests
@@ -217,6 +243,8 @@ export function createServer(options: CreateServerOptions) {
     wayfinderServices,
     networkGatewayManager,
     pingService,
+    requestTracker,
+    httpClient,
   };
 
   // Create Hono app
@@ -224,6 +252,10 @@ export function createServer(options: CreateServerOptions) {
 
   // Global middleware
   app.use("*", cors());
+
+  // Request tracking for graceful shutdown (applied very early)
+  // Returns 503 when shutting down, tracks in-flight requests
+  app.use("*", requestTrackingMiddleware(requestTracker));
 
   // Rate limiting (applied early, but skips health endpoints internally)
   app.use("*", createRateLimitMiddleware(config));
@@ -272,6 +304,9 @@ export function createServer(options: CreateServerOptions) {
     if (pingService) {
       metrics += pingService.getPrometheusMetrics();
     }
+
+    // Add HTTP connection pool metrics
+    metrics += httpClient.getPrometheusMetrics();
 
     return new Response(metrics, {
       status: 200,

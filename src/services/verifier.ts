@@ -17,11 +17,14 @@ import type {
   VerificationResult,
 } from "../types/index.js";
 import { VerificationError } from "../middleware/error-handler.js";
+import { wrapStreamWithTimeout } from "../utils/stream.js";
 
 export interface VerifierOptions {
   verificationStrategy: SdkVerificationStrategy | null;
   /** Provider for verification gateways (to track which gateways verified) */
   verificationProvider: GatewaysProvider | null;
+  /** Timeout for stream reads (per-chunk, prevents zombie connections) */
+  streamTimeoutMs: number;
   logger: Logger;
 }
 
@@ -33,11 +36,13 @@ export interface StreamingVerificationResult {
 export class Verifier {
   private strategy: SdkVerificationStrategy | null;
   private verificationProvider: GatewaysProvider | null;
+  private streamTimeoutMs: number;
   private logger: Logger;
 
   constructor(options: VerifierOptions) {
     this.strategy = options.verificationStrategy;
     this.verificationProvider = options.verificationProvider;
+    this.streamTimeoutMs = options.streamTimeoutMs;
     this.logger = options.logger;
   }
 
@@ -180,6 +185,7 @@ export class Verifier {
     const computeHash = this.computeHash.bind(this);
     const getVerificationGatewayUrls =
       this.getVerificationGatewayUrls.bind(this);
+    const streamTimeoutMs = this.streamTimeoutMs;
 
     let resolveVerification: (result: VerificationResult) => void;
     let rejectVerification: (error: Error) => void;
@@ -198,8 +204,12 @@ export class Verifier {
         let totalSize = 0;
 
         try {
-          // Buffer all data
-          const reader = sourceStream.getReader();
+          // Wrap source stream with timeout protection to prevent zombie connections
+          const timedStream = wrapStreamWithTimeout(
+            sourceStream,
+            streamTimeoutMs,
+          );
+          const reader = timedStream.getReader();
 
           while (true) {
             const { done, value } = await reader.read();
@@ -297,12 +307,13 @@ export class Verifier {
 export function createVerifier(
   verificationStrategy: SdkVerificationStrategy | null,
   verificationProvider: GatewaysProvider | null,
-  _config: RouterConfig,
+  config: RouterConfig,
   logger: Logger,
 ): Verifier {
   return new Verifier({
     verificationStrategy,
     verificationProvider,
+    streamTimeoutMs: config.resilience.streamTimeoutMs,
     logger,
   });
 }

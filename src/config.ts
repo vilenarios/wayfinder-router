@@ -144,6 +144,7 @@ export function loadConfig(): RouterConfig {
       circuitBreakerThreshold: getEnvInt("CIRCUIT_BREAKER_THRESHOLD", 3),
       circuitBreakerResetMs: getEnvInt("CIRCUIT_BREAKER_RESET_MS", 60_000),
       gatewayHealthMaxEntries: getEnvInt("GATEWAY_HEALTH_MAX_ENTRIES", 1000),
+      streamTimeoutMs: getEnvInt("STREAM_TIMEOUT_MS", 120_000), // 2 minutes per chunk
     },
 
     cache: {
@@ -204,6 +205,20 @@ export function loadConfig(): RouterConfig {
       exitOnUnhandledRejection: getEnvBool("EXIT_ON_UNHANDLED_REJECTION", true),
       exitOnUncaughtException: getEnvBool("EXIT_ON_UNCAUGHT_EXCEPTION", true),
       exitGracePeriodMs: getEnvInt("EXIT_GRACE_PERIOD_MS", 3000),
+    },
+
+    // Shutdown settings
+    shutdown: {
+      drainTimeoutMs: getEnvInt("SHUTDOWN_DRAIN_TIMEOUT_MS", 15_000), // 15 seconds
+      shutdownTimeoutMs: getEnvInt("SHUTDOWN_TIMEOUT_MS", 30_000), // 30 seconds
+    },
+
+    // HTTP connection pool settings
+    http: {
+      connectionsPerHost: getEnvInt("HTTP_CONNECTIONS_PER_HOST", 10),
+      connectTimeoutMs: getEnvInt("HTTP_CONNECT_TIMEOUT_MS", 30_000),
+      requestTimeoutMs: getEnvInt("HTTP_REQUEST_TIMEOUT_MS", 30_000),
+      keepAliveTimeoutMs: getEnvInt("HTTP_KEEPALIVE_TIMEOUT_MS", 60_000),
     },
   };
 }
@@ -344,6 +359,15 @@ export function validateConfig(config: RouterConfig): void {
     );
   }
 
+  if (
+    config.resilience.streamTimeoutMs < 10_000 ||
+    config.resilience.streamTimeoutMs > 600_000
+  ) {
+    throw new Error(
+      `STREAM_TIMEOUT_MS must be between 10000 (10s) and 600000 (10 min), got ${config.resilience.streamTimeoutMs}`,
+    );
+  }
+
   // === PING VALIDATION ===
 
   if (config.ping.enabled) {
@@ -383,6 +407,70 @@ export function validateConfig(config: RouterConfig): void {
   if (config.errorHandling.exitGracePeriodMs > 30000) {
     throw new Error(
       `EXIT_GRACE_PERIOD_MS must be <= 30000 (30 seconds), got ${config.errorHandling.exitGracePeriodMs}`,
+    );
+  }
+
+  // === SHUTDOWN VALIDATION ===
+
+  if (
+    config.shutdown.drainTimeoutMs < 1000 ||
+    config.shutdown.drainTimeoutMs > 120_000
+  ) {
+    throw new Error(
+      `SHUTDOWN_DRAIN_TIMEOUT_MS must be between 1000 (1s) and 120000 (2 min), got ${config.shutdown.drainTimeoutMs}`,
+    );
+  }
+
+  if (
+    config.shutdown.shutdownTimeoutMs < 5000 ||
+    config.shutdown.shutdownTimeoutMs > 300_000
+  ) {
+    throw new Error(
+      `SHUTDOWN_TIMEOUT_MS must be between 5000 (5s) and 300000 (5 min), got ${config.shutdown.shutdownTimeoutMs}`,
+    );
+  }
+
+  if (config.shutdown.shutdownTimeoutMs <= config.shutdown.drainTimeoutMs) {
+    throw new Error(
+      `SHUTDOWN_TIMEOUT_MS (${config.shutdown.shutdownTimeoutMs}) must be greater than SHUTDOWN_DRAIN_TIMEOUT_MS (${config.shutdown.drainTimeoutMs})`,
+    );
+  }
+
+  // === HTTP POOL VALIDATION ===
+
+  if (
+    config.http.connectionsPerHost < 1 ||
+    config.http.connectionsPerHost > 100
+  ) {
+    throw new Error(
+      `HTTP_CONNECTIONS_PER_HOST must be between 1 and 100, got ${config.http.connectionsPerHost}`,
+    );
+  }
+
+  if (
+    config.http.connectTimeoutMs < 1000 ||
+    config.http.connectTimeoutMs > 120_000
+  ) {
+    throw new Error(
+      `HTTP_CONNECT_TIMEOUT_MS must be between 1000 (1s) and 120000 (2 min), got ${config.http.connectTimeoutMs}`,
+    );
+  }
+
+  if (
+    config.http.requestTimeoutMs < 5000 ||
+    config.http.requestTimeoutMs > 300_000
+  ) {
+    throw new Error(
+      `HTTP_REQUEST_TIMEOUT_MS must be between 5000 (5s) and 300000 (5 min), got ${config.http.requestTimeoutMs}`,
+    );
+  }
+
+  if (
+    config.http.keepAliveTimeoutMs < 10_000 ||
+    config.http.keepAliveTimeoutMs > 300_000
+  ) {
+    throw new Error(
+      `HTTP_KEEPALIVE_TIMEOUT_MS must be between 10000 (10s) and 300000 (5 min), got ${config.http.keepAliveTimeoutMs}`,
     );
   }
 }
