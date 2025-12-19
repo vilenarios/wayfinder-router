@@ -7,10 +7,12 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 - **Content Verification** - Verifies content integrity via hash checking against trusted gateways
 - **Smart Gateway Selection** - Multiple routing strategies (fastest, random, round-robin) with health tracking
 - **ArNS Support** - Resolves Arweave Name System names with consensus verification
+- **Manifest Verification** - Verifies path manifests and their content mappings
+- **Root Domain Hosting** - Serve any ArNS name directly at your root domain
 - **Two Operating Modes**:
   - `proxy` - Fetches, verifies, and serves content
   - `route` - Redirects clients to gateway URLs
-- **Caching** - In-memory LRU cache for verified content and ArNS resolutions
+- **Caching** - In-memory LRU cache for verified content, manifests, and ArNS resolutions
 - **Circuit Breaker** - Automatically removes unhealthy gateways from rotation
 - **Telemetry** - SQLite-backed metrics for gateway performance tracking
 
@@ -42,6 +44,19 @@ The server starts at `http://localhost:3000` by default.
 
 ## Usage
 
+### Root Domain Hosting
+
+Configure `ARNS_ROOT_HOST` to serve an ArNS name at your root domain:
+```bash
+# In .env
+ARNS_ROOT_HOST=wayfinder
+```
+
+With this configuration:
+- `https://yourdomain.com/` → Serves ArNS "wayfinder" content
+- `https://yourdomain.com/docs` → Serves ArNS "wayfinder" at path `/docs`
+- `https://yourdomain.com/wayfinder/info` → Router info page
+
 ### ArNS Subdomain Requests
 
 Access ArNS names via subdomain:
@@ -71,7 +86,15 @@ Configuration is managed via environment variables. See [.env.example](.env.exam
 
 ## API Endpoints
 
-Visit the root endpoint (`/`) for a list of available endpoints and current configuration.
+| Endpoint | Description |
+|----------|-------------|
+| `/health` | Health check |
+| `/ready` | Readiness check |
+| `/metrics` | Prometheus metrics |
+| `/wayfinder/info` | Router info and configuration |
+| `/stats/gateways` | Gateway performance statistics |
+
+When `ARNS_ROOT_HOST` is not set, the root endpoint (`/`) also displays router info.
 
 ## Docker
 
