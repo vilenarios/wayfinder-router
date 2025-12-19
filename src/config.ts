@@ -80,6 +80,8 @@ export function loadConfig(): RouterConfig {
       port: getEnvInt("PORT", 3000),
       host: getEnv("HOST", "0.0.0.0"),
       baseDomain: getEnv("BASE_DOMAIN", "localhost"),
+      // ArNS name to serve at root domain (empty = show info page at root)
+      arnsRootHost: getEnv("ARNS_ROOT_HOST", ""),
     },
 
     mode: {

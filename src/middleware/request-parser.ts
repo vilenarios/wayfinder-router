@@ -7,16 +7,50 @@ import type { Context, Next } from "hono";
 import type { RequestInfo, RouterConfig } from "../types/index.js";
 import { isTxId, normalizePath, isValidSandbox } from "../utils/url.js";
 
-// Reserved paths that should not be treated as transaction IDs
+// Reserved paths that should not be treated as transaction IDs or ArNS paths
+// These are always handled by the router itself
 const RESERVED_PATHS = new Set(["health", "ready", "metrics", "favicon.ico"]);
+
+// Reserved path prefixes - paths starting with these are always reserved
+const RESERVED_PREFIXES = ["stats/", "wayfinder/"];
+
+/**
+ * Check if a path is reserved (should be handled by the router, not proxied)
+ */
+function isReservedPath(pathname: string): boolean {
+  const pathWithoutLeadingSlash = pathname.startsWith("/")
+    ? pathname.slice(1)
+    : pathname;
+  const firstSegment = pathWithoutLeadingSlash.split("/")[0]?.toLowerCase();
+
+  // Check exact reserved paths
+  if (firstSegment && RESERVED_PATHS.has(firstSegment)) {
+    return true;
+  }
+
+  // Check reserved prefixes
+  const lowerPath = pathWithoutLeadingSlash.toLowerCase();
+  for (const prefix of RESERVED_PREFIXES) {
+    if (lowerPath.startsWith(prefix) || lowerPath === prefix.slice(0, -1)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Parse the incoming request to extract routing information
+ * @param url - The request URL
+ * @param hostname - The request hostname
+ * @param baseDomain - The base domain for the router
+ * @param arnsRootHost - Optional ArNS name to serve at root domain
  */
 export function parseRequest(
   url: URL,
   hostname: string,
   baseDomain: string,
+  arnsRootHost?: string,
 ): RequestInfo {
   // Normalize the base domain (remove port if present in comparison)
   const baseHost = baseDomain.split(":")[0].toLowerCase();
@@ -35,7 +69,7 @@ export function parseRequest(
         const firstSegment = pathSegments[0];
 
         // Check reserved paths first
-        if (firstSegment && RESERVED_PATHS.has(firstSegment.toLowerCase())) {
+        if (isReservedPath(url.pathname)) {
           return {
             type: "reserved",
             path: url.pathname,
@@ -73,8 +107,8 @@ export function parseRequest(
   const pathSegments = url.pathname.split("/").filter(Boolean);
   const firstSegment = pathSegments[0];
 
-  // Check reserved paths first
-  if (firstSegment && RESERVED_PATHS.has(firstSegment.toLowerCase())) {
+  // Check reserved paths first (health, ready, metrics, wayfinder/*, stats/*)
+  if (isReservedPath(url.pathname)) {
     return {
       type: "reserved",
       path: url.pathname,
@@ -92,7 +126,17 @@ export function parseRequest(
     };
   }
 
-  // No ArNS or txId found - reserved/unknown path
+  // No txId found - check if we should route to arnsRootHost
+  if (arnsRootHost) {
+    // Serve root domain content from the configured ArNS name
+    return {
+      type: "arns",
+      arnsName: arnsRootHost.toLowerCase(),
+      path: normalizePath(url.pathname + url.search),
+    };
+  }
+
+  // No ArNS root host configured - treat as reserved (will show info page)
   return {
     type: "reserved",
     path: url.pathname,
@@ -107,7 +151,12 @@ export function createRequestParserMiddleware(config: RouterConfig) {
     const url = new URL(c.req.url);
     const hostname = c.req.header("host") || url.hostname;
 
-    const requestInfo = parseRequest(url, hostname, config.server.baseDomain);
+    const requestInfo = parseRequest(
+      url,
+      hostname,
+      config.server.baseDomain,
+      config.server.arnsRootHost || undefined,
+    );
 
     // Store parsed info in context for handlers
     c.set("requestInfo", requestInfo);

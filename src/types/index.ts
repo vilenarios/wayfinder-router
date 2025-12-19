@@ -47,6 +47,8 @@ export interface RouterConfig {
     port: number;
     host: string;
     baseDomain: string;
+    /** ArNS name to serve at root domain. Empty string = show info page at root */
+    arnsRootHost: string;
   };
 
   mode: {

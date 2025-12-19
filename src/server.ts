@@ -242,9 +242,9 @@ export function createServer(options: CreateServerOptions) {
     const requestInfo = c.get("requestInfo");
     const routerMode = c.get("routerMode");
 
-    // Skip reserved paths
+    // Handle reserved paths
     if (requestInfo.type === "reserved") {
-      // Check for specific reserved paths
+      // Check for specific reserved paths that are handled by registered routes
       if (
         requestInfo.path === "/health" ||
         requestInfo.path === "/ready" ||
@@ -254,8 +254,11 @@ export function createServer(options: CreateServerOptions) {
         return c.json({ error: "Not Found" }, 404);
       }
 
-      // Root path without txId
-      if (requestInfo.path === "/" || requestInfo.path === "") {
+      // Wayfinder info page - available at /wayfinder/info or /wayfinder
+      if (
+        requestInfo.path === "/wayfinder/info" ||
+        requestInfo.path === "/wayfinder"
+      ) {
         return c.json({
           name: "Wayfinder Router",
           version: process.env.npm_package_version || "0.1.0",
@@ -266,6 +269,32 @@ export function createServer(options: CreateServerOptions) {
             health: "/health",
             ready: "/ready",
             metrics: "/metrics",
+            info: "/wayfinder/info",
+          },
+          mode: config.mode.default,
+          verification: {
+            enabled: config.verification.enabled,
+          },
+          arnsRootHost: config.server.arnsRootHost || null,
+        });
+      }
+
+      // Root path without ArNS root host configured - show info page
+      if (
+        (requestInfo.path === "/" || requestInfo.path === "") &&
+        !config.server.arnsRootHost
+      ) {
+        return c.json({
+          name: "Wayfinder Router",
+          version: process.env.npm_package_version || "0.1.0",
+          description: "Lightweight proxy router for ar.io network gateways",
+          endpoints: {
+            arns: "https://{arnsName}." + config.server.baseDomain,
+            txid: "https://" + config.server.baseDomain + "/{txId}",
+            health: "/health",
+            ready: "/ready",
+            metrics: "/metrics",
+            info: "/wayfinder/info",
           },
           mode: config.mode.default,
           verification: {
