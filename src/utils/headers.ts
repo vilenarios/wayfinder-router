@@ -5,10 +5,7 @@
 import type { ProxyMetadata } from "../types/index.js";
 
 // Headers to strip from gateway responses (security)
-const STRIPPED_HEADERS = new Set([
-  "set-cookie",
-  "x-powered-by",
-]);
+const STRIPPED_HEADERS = new Set(["set-cookie", "x-powered-by"]);
 
 // Standard HTTP headers to pass through from gateway response
 const PASSTHROUGH_HEADERS = new Set([

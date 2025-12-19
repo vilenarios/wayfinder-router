@@ -66,17 +66,20 @@ export class ContentFetcher {
 
     let lastError: Error | undefined;
     let lastGateway: URL | undefined;
+    const triedGateways: URL[] = [];
 
     for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
       const startTime = Date.now();
 
       try {
-        // Select a gateway
+        // Select a gateway, excluding already-tried ones
         const gateway = await this.gatewaySelector.selectForTransaction(
           txId,
           path,
+          triedGateways.length > 0 ? triedGateways : undefined,
         );
         lastGateway = gateway;
+        triedGateways.push(gateway);
 
         // Construct the gateway URL
         const gatewayUrl = constructGatewayUrl({
@@ -91,6 +94,7 @@ export class ContentFetcher {
           gatewayUrl: gatewayUrl.toString(),
           txId,
           attempt: attempt + 1,
+          triedGateways: triedGateways.length,
         });
 
         // Create request headers
@@ -182,17 +186,20 @@ export class ContentFetcher {
 
     let lastError: Error | undefined;
     let lastGateway: URL | undefined;
+    const triedGateways: URL[] = [];
 
     for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
       const startTime = Date.now();
 
       try {
-        // Select a gateway
+        // Select a gateway, excluding already-tried ones
         const gateway = await this.gatewaySelector.selectForArns(
           arnsName,
           path,
+          triedGateways.length > 0 ? triedGateways : undefined,
         );
         lastGateway = gateway;
+        triedGateways.push(gateway);
 
         // For ArNS, we use the arnsName as subdomain
         const gatewayUrl = constructArnsGatewayUrl({
@@ -207,6 +214,7 @@ export class ContentFetcher {
           arnsName,
           resolvedTxId,
           attempt: attempt + 1,
+          triedGateways: triedGateways.length,
         });
 
         // Create request headers

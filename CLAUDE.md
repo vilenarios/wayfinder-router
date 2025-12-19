@@ -27,6 +27,11 @@ npm run typecheck    # Type-check without emitting
 npm run test         # Run tests once with vitest
 npm run test:watch   # Run tests in watch mode
 npx vitest run src/path/to/file.test.ts  # Run a single test file
+
+# CLI utilities
+npm run stats        # Show gateway telemetry statistics
+npm run clear:telemetry  # Clear telemetry database
+npm run clear:all    # Clear all data (telemetry + cache)
 ```
 
 ### Docker

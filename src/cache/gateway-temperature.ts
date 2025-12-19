@@ -21,6 +21,10 @@ export interface GatewayTemperature {
   failureCount: number;
   /** Timestamp of last update */
   lastUpdated: number;
+  /** Most recent ping latency (ms) - from background ping service */
+  pingLatencyMs: number | null;
+  /** Timestamp when ping was recorded */
+  pingUpdatedAt: number | null;
 }
 
 export interface GatewayScore {
@@ -36,6 +40,8 @@ export interface GatewayScore {
   successRate: number | null;
   /** Total requests in current window */
   requestCount: number;
+  /** Most recent ping latency (or null if no ping data) */
+  pingLatencyMs: number | null;
 }
 
 export interface GatewayTemperatureCacheOptions {
@@ -132,6 +138,23 @@ export class GatewayTemperatureCache {
   }
 
   /**
+   * Record a ping result from the background ping service.
+   * Ping data is stored separately from request data and blended in scoring.
+   * Note: This doesn't update lastUpdated to prevent pings from keeping
+   * inactive gateways in the cache indefinitely.
+   */
+  recordPing(gateway: string, latencyMs: number): void {
+    const temp = this.getOrCreate(gateway);
+    temp.pingLatencyMs = latencyMs;
+    temp.pingUpdatedAt = Date.now();
+
+    this.logger?.debug("Recorded gateway ping", {
+      gateway,
+      latencyMs,
+    });
+  }
+
+  /**
    * Get the score for a gateway (higher = better)
    */
   getScore(gateway: string): number {
@@ -158,6 +181,7 @@ export class GatewayTemperatureCache {
         p95LatencyMs: null,
         successRate: null,
         requestCount: 0,
+        pingLatencyMs: temp?.pingLatencyMs ?? null,
       };
     }
 
@@ -183,6 +207,7 @@ export class GatewayTemperatureCache {
       p95LatencyMs,
       successRate,
       requestCount: temp.successCount + temp.failureCount,
+      pingLatencyMs: this.isPingStale(temp) ? null : temp.pingLatencyMs,
     };
   }
 
@@ -272,6 +297,8 @@ export class GatewayTemperatureCache {
         successCount: 0,
         failureCount: 0,
         lastUpdated: Date.now(),
+        pingLatencyMs: null,
+        pingUpdatedAt: null,
       };
       this.temperatures.set(gateway, temp);
     }
@@ -283,6 +310,16 @@ export class GatewayTemperatureCache {
    */
   private isStale(temp: GatewayTemperature): boolean {
     return Date.now() - temp.lastUpdated > this.windowMs;
+  }
+
+  /**
+   * Check if ping data is stale (older than 8 hours = 2x default ping interval)
+   */
+  private isPingStale(temp: GatewayTemperature): boolean {
+    if (!temp.pingUpdatedAt) return true;
+    // Ping data expires after 8 hours (2x the default 4-hour refresh interval)
+    const PING_STALE_THRESHOLD_MS = 8 * 60 * 60 * 1000;
+    return Date.now() - temp.pingUpdatedAt > PING_STALE_THRESHOLD_MS;
   }
 
   /**
@@ -326,7 +363,10 @@ export class GatewayTemperatureCache {
       const entries = [...this.temperatures.entries()].sort(
         (a, b) => a[1].lastUpdated - b[1].lastUpdated,
       );
-      const toRemove = entries.slice(0, this.temperatures.size - this.maxGateways);
+      const toRemove = entries.slice(
+        0,
+        this.temperatures.size - this.maxGateways,
+      );
       for (const [gateway] of toRemove) {
         this.temperatures.delete(gateway);
         pruned++;
@@ -351,14 +391,39 @@ export class GatewayTemperatureCache {
   }
 
   /**
+   * Calculate latency bonus/penalty based on latency value.
+   * Returns a value from -30 (very slow) to +30 (excellent).
+   */
+  private latencyBonus(latencyMs: number): number {
+    // Latency scoring:
+    // < 100ms = +30 (excellent)
+    // 100-250ms = +15 (good)
+    // 250-500ms = 0 (acceptable)
+    // 500-1000ms = -15 (slow)
+    // > 1000ms = -30 (very slow)
+    if (latencyMs < 100) {
+      return 30;
+    } else if (latencyMs < 250) {
+      return 15;
+    } else if (latencyMs < 500) {
+      return 0;
+    } else if (latencyMs < 1000) {
+      return -15;
+    } else {
+      return -30;
+    }
+  }
+
+  /**
    * Calculate score for a gateway based on its temperature
    *
-   * Score formula combines:
-   * - Latency: Lower is better (inversely proportional)
-   * - Success rate: Higher is better
-   * - Recency: More recent data is weighted higher
+   * Score formula combines (weights adjusted for ping integration):
+   * - Success rate: 28% weight (reduced from 40%)
+   * - Request latency: 42% weight (reduced from 60%)
+   * - Ping latency: 30% weight (new)
    *
-   * Score range: 0-100
+   * Total: 100% (actual request performance 70%, ping 30%)
+   * Score range: 1-100
    */
   private calculateScore(temp: GatewayTemperature): number {
     const successRate = this.calculateSuccessRate(temp);
@@ -371,31 +436,22 @@ export class GatewayTemperatureCache {
     // Start with base score
     let score = this.defaultScore;
 
-    // Adjust for success rate (weight: 40%)
+    // Adjust for success rate (weight: 28% - reduced from 40%)
     if (successRate !== null) {
-      // successRate 1.0 = +20, successRate 0.5 = 0, successRate 0.0 = -20
-      score += (successRate - 0.5) * 40;
+      // successRate 1.0 = +14, successRate 0.5 = 0, successRate 0.0 = -14
+      score += (successRate - 0.5) * 28;
     }
 
-    // Adjust for latency (weight: 60%)
+    // Adjust for request latency (weight: 42% - reduced from 60%)
+    // We apply 70% of the latency bonus to account for reduced weight
     if (avgLatency !== null) {
-      // Latency scoring:
-      // < 100ms = +30 (excellent)
-      // 100-250ms = +15 (good)
-      // 250-500ms = 0 (acceptable)
-      // 500-1000ms = -15 (slow)
-      // > 1000ms = -30 (very slow)
-      if (avgLatency < 100) {
-        score += 30;
-      } else if (avgLatency < 250) {
-        score += 15;
-      } else if (avgLatency < 500) {
-        // neutral
-      } else if (avgLatency < 1000) {
-        score -= 15;
-      } else {
-        score -= 30;
-      }
+      score += this.latencyBonus(avgLatency) * 0.7;
+    }
+
+    // Adjust for ping latency (weight: 30% - new)
+    // We apply 50% of the latency bonus (30/60 = 0.5 of original weight)
+    if (temp.pingLatencyMs !== null && !this.isPingStale(temp)) {
+      score += this.latencyBonus(temp.pingLatencyMs) * 0.5;
     }
 
     // Clamp score to 1-100 range (never 0 to ensure all gateways have some chance)

@@ -9,6 +9,8 @@ export interface GatewayHealthCacheOptions {
   healthTtlMs?: number;
   circuitBreakerThreshold?: number;
   circuitBreakerResetMs?: number;
+  /** Maximum number of gateway entries to track (prevents memory leaks) */
+  maxGateways?: number;
   logger?: Logger;
 }
 
@@ -17,6 +19,8 @@ export class GatewayHealthCache {
   private healthTtlMs: number;
   private circuitBreakerThreshold: number;
   private circuitBreakerResetMs: number;
+  private maxGateways: number;
+  private lastPruneTime: number;
   private logger?: Logger;
 
   constructor(options: GatewayHealthCacheOptions = {}) {
@@ -24,6 +28,7 @@ export class GatewayHealthCache {
       healthTtlMs = 300_000,
       circuitBreakerThreshold = 3,
       circuitBreakerResetMs = 60_000,
+      maxGateways = 1000,
       logger,
     } = options;
 
@@ -31,6 +36,8 @@ export class GatewayHealthCache {
     this.healthTtlMs = healthTtlMs;
     this.circuitBreakerThreshold = circuitBreakerThreshold;
     this.circuitBreakerResetMs = circuitBreakerResetMs;
+    this.maxGateways = maxGateways;
+    this.lastPruneTime = 0;
     this.logger = logger;
   }
 
@@ -102,6 +109,9 @@ export class GatewayHealthCache {
    * Record a failure for a gateway
    */
   recordFailure(gateway: URL | string): void {
+    // Periodically prune to prevent unbounded growth
+    this.maybePrune();
+
     const key = this.normalizeKey(gateway);
     const now = Date.now();
 
@@ -143,6 +153,9 @@ export class GatewayHealthCache {
    * Explicitly mark a gateway as unhealthy
    */
   markUnhealthy(gateway: URL | string, durationMs?: number): void {
+    // Periodically prune to prevent unbounded growth
+    this.maybePrune();
+
     const key = this.normalizeKey(gateway);
     const now = Date.now();
 
@@ -168,6 +181,49 @@ export class GatewayHealthCache {
   clear(): void {
     this.health.clear();
     this.logger?.info("Gateway health cache cleared");
+  }
+
+  /**
+   * Periodically prune stale entries to prevent unbounded memory growth.
+   */
+  private maybePrune(): void {
+    const now = Date.now();
+
+    // Only prune once per healthTtlMs period
+    if (now - this.lastPruneTime < this.healthTtlMs) {
+      return;
+    }
+    this.lastPruneTime = now;
+
+    // Remove expired entries
+    const staleThreshold = this.healthTtlMs * 2;
+    let pruned = 0;
+
+    for (const [key, state] of this.health.entries()) {
+      if (now - state.lastChecked > staleThreshold) {
+        this.health.delete(key);
+        pruned++;
+      }
+    }
+
+    // If still over max, remove oldest entries
+    if (this.health.size > this.maxGateways) {
+      const entries = [...this.health.entries()].sort(
+        (a, b) => a[1].lastChecked - b[1].lastChecked,
+      );
+      const toRemove = entries.slice(0, this.health.size - this.maxGateways);
+      for (const [key] of toRemove) {
+        this.health.delete(key);
+        pruned++;
+      }
+    }
+
+    if (pruned > 0) {
+      this.logger?.debug("Pruned stale gateway health entries", {
+        pruned,
+        remaining: this.health.size,
+      });
+    }
   }
 
   /**

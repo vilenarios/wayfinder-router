@@ -34,10 +34,7 @@ import {
   extractManifestInfo,
   isManifestResponse,
 } from "../utils/headers.js";
-import {
-  sandboxFromTxId,
-  validateSandboxForTxId,
-} from "../utils/url.js";
+import { sandboxFromTxId, validateSandboxForTxId } from "../utils/url.js";
 
 export interface ProxyHandlerDeps {
   arnsResolver: ArnsResolver;

@@ -41,6 +41,10 @@ import {
   createManifestResolver,
   type ManifestResolver,
 } from "./services/manifest-resolver.js";
+import {
+  GatewayPingService,
+  createGatewayPingService,
+} from "./services/gateway-ping-service.js";
 
 import { createProxyHandler } from "./handlers/proxy.js";
 import { createRouteHandler } from "./handlers/route.js";
@@ -79,6 +83,7 @@ export interface RouterServices {
   contentCache: ContentCache;
   wayfinderServices: WayfinderServices;
   networkGatewayManager: NetworkGatewayManager | null;
+  pingService: GatewayPingService | null;
 }
 
 export interface CreateServerOptions {
@@ -169,6 +174,38 @@ export function createServer(options: CreateServerOptions) {
     createDisabledTelemetryService(logger);
   }
 
+  // Create ping service if enabled and conditions are met:
+  // - ping.enabled is true
+  // - routing strategy is "temperature" (needs temperature cache)
+  // - network manager exists (needs gateway list)
+  // - temperature cache exists
+  let pingService: GatewayPingService | null = null;
+  if (
+    config.ping.enabled &&
+    config.routing.strategy === "temperature" &&
+    networkGatewayManager &&
+    wayfinderServices.temperatureCache
+  ) {
+    pingService = createGatewayPingService({
+      networkManager: networkGatewayManager,
+      temperatureCache: wayfinderServices.temperatureCache,
+      gatewaySelector, // For health tracking (circuit breaker)
+      intervalHours: config.ping.intervalHours,
+      gatewayCount: config.ping.gatewayCount,
+      timeoutMs: config.ping.timeoutMs,
+      concurrency: config.ping.concurrency,
+      logger,
+    });
+    logger.info("Gateway ping service created", {
+      intervalHours: config.ping.intervalHours,
+      gatewayCount: config.ping.gatewayCount,
+    });
+  } else if (config.ping.enabled && config.routing.strategy !== "temperature") {
+    logger.debug(
+      "Gateway ping service disabled: requires temperature routing strategy",
+    );
+  }
+
   const services: RouterServices = {
     arnsResolver,
     gatewaySelector,
@@ -179,6 +216,7 @@ export function createServer(options: CreateServerOptions) {
     contentCache,
     wayfinderServices,
     networkGatewayManager,
+    pingService,
   };
 
   // Create Hono app
@@ -230,6 +268,11 @@ export function createServer(options: CreateServerOptions) {
       metrics += telemetryService.getPrometheusMetrics();
     }
 
+    // Add ping service metrics if enabled
+    if (pingService) {
+      metrics += pingService.getPrometheusMetrics();
+    }
+
     return new Response(metrics, {
       status: 200,
       headers: {
@@ -241,8 +284,14 @@ export function createServer(options: CreateServerOptions) {
   // Stats API endpoints (only when telemetry enabled)
   const statsDeps = { telemetryService, logger };
   app.get("/wayfinder/stats/gateways", createGatewayStatsHandler(statsDeps));
-  app.get("/wayfinder/stats/gateways/list", createGatewayListHandler(statsDeps));
-  app.get("/wayfinder/stats/gateways/:gateway", createGatewayDetailHandler(statsDeps));
+  app.get(
+    "/wayfinder/stats/gateways/list",
+    createGatewayListHandler(statsDeps),
+  );
+  app.get(
+    "/wayfinder/stats/gateways/:gateway",
+    createGatewayDetailHandler(statsDeps),
+  );
   app.get("/wayfinder/stats/export", createRewardExportHandler(statsDeps));
 
   // Main request handler

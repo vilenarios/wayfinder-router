@@ -9,7 +9,7 @@ import pino from "pino";
 
 import { loadConfig, validateConfig } from "./config.js";
 import { createServer } from "./server.js";
-import type { Logger } from "./types/index.js";
+import type { Logger, RouterConfig } from "./types/index.js";
 
 /**
  * Create pino logger with configuration
@@ -61,12 +61,91 @@ function createLogger(level: string): Logger {
 }
 
 /**
+ * Setup global error handlers for unhandled rejections and uncaught exceptions.
+ * These handlers catch errors that would otherwise crash the process or leave it
+ * in an undefined state.
+ */
+function setupGlobalErrorHandlers(logger: Logger, config: RouterConfig): void {
+  // Track if we're already in shutdown mode to prevent duplicate handling
+  let isExiting = false;
+
+  /**
+   * Handle unhandled promise rejections.
+   * These occur when a Promise is rejected and no .catch() handler is attached.
+   */
+  process.on("unhandledRejection", (reason: unknown) => {
+    const error = reason instanceof Error ? reason : new Error(String(reason));
+
+    logger.error("Unhandled promise rejection", {
+      error: error.message,
+      stack: error.stack,
+    });
+
+    if (config.errorHandling.exitOnUnhandledRejection && !isExiting) {
+      isExiting = true;
+      logger.error(
+        "Exiting due to unhandled rejection (EXIT_ON_UNHANDLED_REJECTION=true)",
+      );
+
+      // Allow time for logs to flush before exiting
+      setTimeout(() => {
+        process.exit(1);
+      }, config.errorHandling.exitGracePeriodMs);
+    }
+  });
+
+  /**
+   * Handle uncaught exceptions.
+   * After an uncaughtException, the process is in an undefined state
+   * and should generally exit to prevent unpredictable behavior.
+   */
+  process.on("uncaughtException", (error: Error, origin: string) => {
+    // Use console.error as fallback in case logger itself is broken
+    try {
+      logger.error("Uncaught exception", {
+        error: error.message,
+        stack: error.stack,
+        origin,
+      });
+    } catch {
+      console.error("Uncaught exception (logger failed):", error);
+    }
+
+    if (config.errorHandling.exitOnUncaughtException && !isExiting) {
+      isExiting = true;
+
+      try {
+        logger.error(
+          "Exiting due to uncaught exception (EXIT_ON_UNCAUGHT_EXCEPTION=true)",
+        );
+      } catch {
+        console.error("Exiting due to uncaught exception");
+      }
+
+      // Allow time for logs to flush before exiting
+      setTimeout(() => {
+        process.exit(1);
+      }, config.errorHandling.exitGracePeriodMs);
+    }
+  });
+
+  logger.debug("Global error handlers registered", {
+    exitOnUnhandledRejection: config.errorHandling.exitOnUnhandledRejection,
+    exitOnUncaughtException: config.errorHandling.exitOnUncaughtException,
+    exitGracePeriodMs: config.errorHandling.exitGracePeriodMs,
+  });
+}
+
+/**
  * Main entry point
  */
 async function main() {
   // Load and validate configuration
   const config = loadConfig();
   const logger = createLogger(config.logging.level);
+
+  // Setup global error handlers early (before any async operations)
+  setupGlobalErrorHandlers(logger, config);
 
   try {
     validateConfig(config);
@@ -96,7 +175,9 @@ async function main() {
     await services.networkGatewayManager.initialize();
   }
 
-  // Start server
+  // Start server first - don't block on ping service
+  // The temperature cache works fine without ping data (uses default scores)
+  // and will improve as ping data populates in the background
   const server = serve({
     fetch: app.fetch,
     port: config.server.port,
@@ -107,9 +188,26 @@ async function main() {
     url: `http://${config.server.host}:${config.server.port}`,
   });
 
+  // Initialize ping service in background (non-blocking)
+  // The initial ping round will run while the server is already accepting requests
+  if (services.pingService) {
+    logger.info("Starting gateway ping service in background...");
+    services.pingService.initialize().catch((error) => {
+      logger.warn("Gateway ping service initialization failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info("Shutdown signal received", { signal });
+
+    // Stop ping service first (it depends on network manager)
+    if (services.pingService) {
+      logger.info("Stopping gateway ping service");
+      services.pingService.stop();
+    }
 
     // Stop network gateway manager
     if (services.networkGatewayManager) {

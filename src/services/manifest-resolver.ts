@@ -69,7 +69,9 @@ class HashMismatchError extends Error {
     public readonly computedHash: string,
     public readonly expectedHash: string,
   ) {
-    super(`Hash mismatch from ${gateway}: computed ${computedHash}, expected ${expectedHash}`);
+    super(
+      `Hash mismatch from ${gateway}: computed ${computedHash}, expected ${expectedHash}`,
+    );
     this.name = "HashMismatchError";
   }
 }
@@ -389,16 +391,20 @@ export class ManifestResolver {
     if (eligibleGateways.length === 0) {
       return {
         verified: false,
-        error: "No trusted gateways available for verification (source gateway excluded)",
+        error:
+          "No trusted gateways available for verification (source gateway excluded)",
       };
     }
 
-    this.logger.debug("Verifying manifest hash against trusted gateways (parallel)", {
-      manifestTxId,
-      sourceGateway: sourceGateway.toString(),
-      computedHash,
-      eligibleGatewayCount: eligibleGateways.length,
-    });
+    this.logger.debug(
+      "Verifying manifest hash against trusted gateways (parallel)",
+      {
+        manifestTxId,
+        sourceGateway: sourceGateway.toString(),
+        computedHash,
+        eligibleGatewayCount: eligibleGateways.length,
+      },
+    );
 
     // Query all trusted gateways in parallel
     const verifyPromises = eligibleGateways.map(async (gateway) => {
@@ -426,7 +432,9 @@ export class ManifestResolver {
 
     // Check for any successful verification
     const success = results.find(
-      (r): r is PromiseFulfilledResult<{ verified: true; verifiedBy: string }> =>
+      (
+        r,
+      ): r is PromiseFulfilledResult<{ verified: true; verifiedBy: string }> =>
         r.status === "fulfilled",
     );
 

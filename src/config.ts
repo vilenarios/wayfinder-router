@@ -143,6 +143,7 @@ export function loadConfig(): RouterConfig {
       gatewayHealthTtlMs: getEnvInt("GATEWAY_HEALTH_TTL_MS", 300_000),
       circuitBreakerThreshold: getEnvInt("CIRCUIT_BREAKER_THRESHOLD", 3),
       circuitBreakerResetMs: getEnvInt("CIRCUIT_BREAKER_RESET_MS", 60_000),
+      gatewayHealthMaxEntries: getEnvInt("GATEWAY_HEALTH_MAX_ENTRIES", 1000),
     },
 
     cache: {
@@ -188,6 +189,22 @@ export function loadConfig(): RouterConfig {
       windowMs: getEnvInt("RATE_LIMIT_WINDOW_MS", 60_000), // 1 minute default
       maxRequests: getEnvInt("RATE_LIMIT_MAX_REQUESTS", 1000),
     },
+
+    // Gateway ping settings (for temperature strategy)
+    ping: {
+      enabled: getEnvBool("PING_ENABLED", true),
+      intervalHours: getEnvInt("PING_INTERVAL_HOURS", 4),
+      gatewayCount: getEnvInt("PING_GATEWAY_COUNT", 50),
+      timeoutMs: getEnvInt("PING_TIMEOUT_MS", 5000),
+      concurrency: getEnvInt("PING_CONCURRENCY", 10),
+    },
+
+    // Error handling settings
+    errorHandling: {
+      exitOnUnhandledRejection: getEnvBool("EXIT_ON_UNHANDLED_REJECTION", true),
+      exitOnUncaughtException: getEnvBool("EXIT_ON_UNCAUGHT_EXCEPTION", true),
+      exitGracePeriodMs: getEnvInt("EXIT_GRACE_PERIOD_MS", 3000),
+    },
   };
 }
 
@@ -230,7 +247,10 @@ export function validateConfig(config: RouterConfig): void {
 
   // Validate consensus threshold
   // SECURITY: Require at least 2 gateways for consensus to prevent single-gateway attacks
-  if (config.verification.enabled && config.verification.consensusThreshold < 2) {
+  if (
+    config.verification.enabled &&
+    config.verification.consensusThreshold < 2
+  ) {
     throw new Error(
       `ARNS_CONSENSUS_THRESHOLD must be at least 2 for security (got ${config.verification.consensusThreshold}). ` +
         "A single gateway could otherwise dictate ArNS resolutions.",
@@ -314,5 +334,55 @@ export function validateConfig(config: RouterConfig): void {
         "Using network gateway source but no NETWORK_FALLBACK_GATEWAYS configured for failover",
       );
     }
+  }
+
+  // === RESILIENCE VALIDATION ===
+
+  if (config.resilience.gatewayHealthMaxEntries < 10) {
+    throw new Error(
+      `GATEWAY_HEALTH_MAX_ENTRIES must be at least 10, got ${config.resilience.gatewayHealthMaxEntries}`,
+    );
+  }
+
+  // === PING VALIDATION ===
+
+  if (config.ping.enabled) {
+    if (config.ping.intervalHours < 1) {
+      throw new Error(
+        `PING_INTERVAL_HOURS must be at least 1, got ${config.ping.intervalHours}`,
+      );
+    }
+
+    if (config.ping.gatewayCount < 1 || config.ping.gatewayCount > 200) {
+      throw new Error(
+        `PING_GATEWAY_COUNT must be between 1 and 200, got ${config.ping.gatewayCount}`,
+      );
+    }
+
+    if (config.ping.timeoutMs < 1000 || config.ping.timeoutMs > 30000) {
+      throw new Error(
+        `PING_TIMEOUT_MS must be between 1000 and 30000, got ${config.ping.timeoutMs}`,
+      );
+    }
+
+    if (config.ping.concurrency < 1 || config.ping.concurrency > 50) {
+      throw new Error(
+        `PING_CONCURRENCY must be between 1 and 50, got ${config.ping.concurrency}`,
+      );
+    }
+  }
+
+  // === ERROR HANDLING VALIDATION ===
+
+  if (config.errorHandling.exitGracePeriodMs < 0) {
+    throw new Error(
+      `EXIT_GRACE_PERIOD_MS must be >= 0, got ${config.errorHandling.exitGracePeriodMs}`,
+    );
+  }
+
+  if (config.errorHandling.exitGracePeriodMs > 30000) {
+    throw new Error(
+      `EXIT_GRACE_PERIOD_MS must be <= 30000 (30 seconds), got ${config.errorHandling.exitGracePeriodMs}`,
+    );
   }
 }

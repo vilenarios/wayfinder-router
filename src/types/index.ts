@@ -33,7 +33,11 @@ export type RequestInfo =
 export type RouterMode = "proxy" | "route";
 
 // Routing strategies
-export type RoutingStrategy = "fastest" | "random" | "round-robin" | "temperature";
+export type RoutingStrategy =
+  | "fastest"
+  | "random"
+  | "round-robin"
+  | "temperature";
 
 // Gateway sources for ROUTING (where to fetch data - trust not required)
 export type RoutingGatewaySource = "network" | "trusted-peers" | "static";
@@ -101,6 +105,8 @@ export interface RouterConfig {
     gatewayHealthTtlMs: number;
     circuitBreakerThreshold: number;
     circuitBreakerResetMs: number;
+    /** Maximum entries in gateway health cache (prevents memory leaks) */
+    gatewayHealthMaxEntries: number;
   };
 
   cache: {
@@ -139,6 +145,25 @@ export interface RouterConfig {
     enabled: boolean;
     windowMs: number;
     maxRequests: number;
+  };
+
+  // Gateway ping settings (for temperature strategy)
+  ping: {
+    enabled: boolean;
+    intervalHours: number;
+    gatewayCount: number;
+    timeoutMs: number;
+    concurrency: number;
+  };
+
+  // Error handling settings
+  errorHandling: {
+    /** Exit process on unhandled promise rejection (recommended: true) */
+    exitOnUnhandledRejection: boolean;
+    /** Exit process on uncaught exception (recommended: true) */
+    exitOnUncaughtException: boolean;
+    /** Grace period before forced exit to allow logs to flush (ms) */
+    exitGracePeriodMs: number;
   };
 }
 

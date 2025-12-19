@@ -28,6 +28,8 @@ export interface SelectGatewayParams {
   txId?: string;
   arnsName?: string;
   path?: string;
+  /** Gateways to exclude from selection (e.g., already tried) */
+  exclude?: URL[];
 }
 
 export class GatewaySelector {
@@ -57,7 +59,7 @@ export class GatewaySelector {
    * Select a healthy gateway for the request
    */
   async select(params: SelectGatewayParams): Promise<URL> {
-    const { txId, arnsName, path } = params;
+    const { txId, arnsName, path, exclude } = params;
 
     // Get all available gateways
     const allGateways = await this.gatewaysProvider.getGateways();
@@ -78,12 +80,44 @@ export class GatewaySelector {
       healthyGateways = allGateways;
     }
 
+    // Exclude already-tried gateways (for retry scenarios)
+    if (exclude && exclude.length > 0) {
+      const excludeSet = new Set(exclude.map((url) => url.toString()));
+      const beforeExclude = healthyGateways.length;
+      healthyGateways = healthyGateways.filter(
+        (gw) => !excludeSet.has(gw.toString()),
+      );
+      if (healthyGateways.length < beforeExclude) {
+        this.logger.debug("Excluded already-tried gateways", {
+          excluded: exclude.length,
+          remainingHealthy: healthyGateways.length,
+        });
+      }
+
+      // If all healthy gateways were excluded, fall back to untried gateways
+      // (including unhealthy ones - better to try than give up entirely)
+      if (healthyGateways.length === 0) {
+        this.logger.warn(
+          "All healthy gateways already tried, falling back to untried gateways",
+        );
+        healthyGateways = allGateways.filter(
+          (gw) => !excludeSet.has(gw.toString()),
+        );
+        // If all gateways were tried, use all gateways as last resort
+        if (healthyGateways.length === 0) {
+          this.logger.warn("All gateways exhausted, retrying from full list");
+          healthyGateways = allGateways;
+        }
+      }
+    }
+
     // Compute subdomain for routing
     const subdomain = txId ? sandboxFromTxId(txId) : arnsName?.toLowerCase();
 
     this.logger.debug("Selecting gateway", {
       totalGateways: allGateways.length,
       healthyGateways: healthyGateways.length,
+      excluded: exclude?.length || 0,
       subdomain,
       path,
     });
@@ -128,15 +162,23 @@ export class GatewaySelector {
   /**
    * Select a gateway specifically for a transaction ID
    */
-  async selectForTransaction(txId: string, path: string = "/"): Promise<URL> {
-    return this.select({ txId, path });
+  async selectForTransaction(
+    txId: string,
+    path: string = "/",
+    exclude?: URL[],
+  ): Promise<URL> {
+    return this.select({ txId, path, exclude });
   }
 
   /**
    * Select a gateway specifically for an ArNS name
    */
-  async selectForArns(arnsName: string, path: string = "/"): Promise<URL> {
-    return this.select({ arnsName, path });
+  async selectForArns(
+    arnsName: string,
+    path: string = "/",
+    exclude?: URL[],
+  ): Promise<URL> {
+    return this.select({ arnsName, path, exclude });
   }
 
   /**
