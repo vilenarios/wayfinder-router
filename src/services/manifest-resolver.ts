@@ -16,7 +16,6 @@ import type {
   ManifestPathResolution,
 } from "../types/manifest.js";
 import { isArweaveManifest, normalizeManifestPath } from "../types/manifest.js";
-import type { Verifier } from "./verifier.js";
 import { ManifestCache } from "../cache/manifest-cache.js";
 import { WayfinderError } from "../middleware/error-handler.js";
 
@@ -63,7 +62,6 @@ export interface ManifestResolverOptions {
   gatewaysProvider: GatewaysProvider;
   /** Static fallback gateways (used if provider returns empty) */
   fallbackGateways: URL[];
-  verifier: Verifier;
   cache: ManifestCache;
   logger: Logger;
   fetchTimeoutMs?: number;
@@ -72,7 +70,6 @@ export interface ManifestResolverOptions {
 export class ManifestResolver {
   private gatewaysProvider: GatewaysProvider;
   private fallbackGateways: URL[];
-  private verifier: Verifier;
   private cache: ManifestCache;
   private logger: Logger;
   private fetchTimeoutMs: number;
@@ -83,7 +80,6 @@ export class ManifestResolver {
   constructor(options: ManifestResolverOptions) {
     this.gatewaysProvider = options.gatewaysProvider;
     this.fallbackGateways = options.fallbackGateways;
-    this.verifier = options.verifier;
     this.cache = options.cache;
     this.logger = options.logger;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? 30000;
@@ -264,6 +260,9 @@ export class ManifestResolver {
    * NOTE: We use custom verification instead of the SDK's HashVerificationStrategy
    * because the SDK fetches hashes from /{txId} which returns index content for
    * manifests, not the raw manifest JSON. We fetch from /raw/{txId} instead.
+   *
+   * Uses Promise.any() to fetch from all gateways in parallel for better performance.
+   * Returns as soon as any gateway successfully fetches and verifies the manifest.
    */
   private async fetchAndVerifyManifest(
     manifestTxId: string,
@@ -278,10 +277,8 @@ export class ManifestResolver {
       );
     }
 
-    let lastError: Error | undefined;
-
-    // Try each trusted gateway
-    for (const gateway of trustedGateways) {
+    // Try all gateways in parallel, return first success
+    const fetchPromises = trustedGateways.map(async (gateway) => {
       try {
         const result = await this.fetchRawManifest(gateway, manifestTxId);
 
@@ -321,71 +318,67 @@ export class ManifestResolver {
           sizeBytes: result.data.length,
         };
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         this.logger.warn("Failed to fetch manifest from gateway", {
           manifestTxId,
           gateway: gateway.toString(),
-          error: lastError.message,
+          error: errorMessage,
         });
+        // Re-throw to let Promise.any() handle it
+        throw error;
       }
-    }
+    });
 
-    // All gateways failed
-    throw new ManifestError(
-      manifestTxId,
-      `Failed to fetch manifest from any trusted gateway: ${lastError?.message || "unknown error"}`,
-    );
+    try {
+      // Return the first successful result
+      return await Promise.any(fetchPromises);
+    } catch (error) {
+      // All promises rejected - AggregateError contains all errors
+      if (error instanceof AggregateError) {
+        const lastError = error.errors[error.errors.length - 1];
+        const errorMessage =
+          lastError instanceof Error ? lastError.message : String(lastError);
+        throw new ManifestError(
+          manifestTxId,
+          `Failed to fetch manifest from any trusted gateway: ${errorMessage}`,
+        );
+      }
+      throw error;
+    }
   }
 
   /**
    * Verify manifest hash using /raw/ endpoint
    *
-   * 1. Check if x-ar-io-digest header is present from source gateway
-   * 2. If not, fetch hash from other trusted gateways via /raw/ endpoint
-   * 3. Compute SHA-256 hash of received data
-   * 4. Compare and verify
+   * SECURITY: We ALWAYS fetch the expected hash from trusted gateways.
+   * Never trust the source gateway's x-ar-io-digest header - a malicious
+   * gateway could serve bad content with a matching bad digest.
+   *
+   * 1. Compute SHA-256 hash of received data
+   * 2. Fetch expected hash from trusted gateways via /raw/ endpoint
+   * 3. Compare computed hash vs trusted hash
    */
   private async verifyManifestHash(
     data: Uint8Array,
     manifestTxId: string,
-    headers: Record<string, string>,
+    _headers: Record<string, string>,
     sourceGateway: URL,
     trustedGateways: URL[],
   ): Promise<{ verified: boolean; error?: string; verifiedBy?: string }> {
-    // Compute hash of the manifest data
+    // Compute hash of the manifest data we received
     const computedHash = createHash("sha256").update(data).digest("base64url");
 
-    // Check if source gateway provided the digest
-    const sourceDigest = headers["x-ar-io-digest"];
-    if (sourceDigest) {
-      if (computedHash === sourceDigest) {
-        this.logger.debug("Manifest verified using source gateway digest", {
-          manifestTxId,
-          gateway: sourceGateway.toString(),
-          hash: computedHash,
-        });
-        return { verified: true, verifiedBy: sourceGateway.toString() };
-      }
-      // Hash mismatch with source gateway
-      return {
-        verified: false,
-        error: `Hash mismatch: computed ${computedHash}, source gateway returned ${sourceDigest}`,
-      };
-    }
+    this.logger.debug("Verifying manifest hash against trusted gateways", {
+      manifestTxId,
+      sourceGateway: sourceGateway.toString(),
+      computedHash,
+      trustedGatewayCount: trustedGateways.length,
+    });
 
-    // Source gateway didn't provide digest, fetch from other trusted gateways
-    this.logger.debug(
-      "Source gateway missing x-ar-io-digest, fetching from other gateways",
-      {
-        manifestTxId,
-        sourceGateway: sourceGateway.toString(),
-      },
-    );
-
-    // Try other gateways to get the expected hash
+    // ALWAYS fetch expected hash from trusted gateways (never trust source)
     for (const gateway of trustedGateways) {
-      // Skip the source gateway we already tried
+      // Skip the source gateway - we need independent verification
       if (gateway.toString() === sourceGateway.toString()) {
         continue;
       }
@@ -394,21 +387,28 @@ export class ManifestResolver {
         const expectedHash = await this.fetchRawDigest(gateway, manifestTxId);
         if (expectedHash) {
           if (computedHash === expectedHash) {
-            this.logger.debug("Manifest verified using trusted gateway digest", {
+            this.logger.debug("Manifest verified against trusted gateway", {
               manifestTxId,
               verifyGateway: gateway.toString(),
               hash: computedHash,
             });
             return { verified: true, verifiedBy: gateway.toString() };
           }
-          // Hash mismatch
+          // Hash mismatch - source gateway may have served bad content
+          this.logger.warn("Manifest hash mismatch - possible tampering", {
+            manifestTxId,
+            sourceGateway: sourceGateway.toString(),
+            computedHash,
+            expectedHash,
+            trustedGateway: gateway.toString(),
+          });
           return {
             verified: false,
             error: `Hash mismatch: computed ${computedHash}, trusted gateway returned ${expectedHash}`,
           };
         }
       } catch (error) {
-        this.logger.debug("Failed to fetch digest from gateway", {
+        this.logger.debug("Failed to fetch digest from trusted gateway", {
           manifestTxId,
           gateway: gateway.toString(),
           error: error instanceof Error ? error.message : String(error),
@@ -416,23 +416,16 @@ export class ManifestResolver {
       }
     }
 
-    // No gateway returned a digest - fall back to SDK verification if enabled
-    if (this.verifier.enabled) {
-      this.logger.debug(
-        "No gateway provided x-ar-io-digest, falling back to SDK verification",
-        { manifestTxId },
-      );
-      const sdkResult = await this.verifier.verify(data, manifestTxId, headers);
-      return {
-        verified: sdkResult.verified,
-        error: sdkResult.error,
-        verifiedBy: sdkResult.verifiedByGateways?.join(", "),
-      };
-    }
-
+    // No trusted gateway returned a digest - cannot verify manifest
+    // NOTE: We intentionally do NOT fall back to SDK verification here.
+    // The SDK's HashVerificationStrategy fetches hashes from /{txId} which
+    // returns the INDEX CONTENT hash for manifests, not the raw manifest hash.
+    // This would always fail for manifests, so we fail explicitly instead.
     return {
       verified: false,
-      error: "No trusted gateway provided x-ar-io-digest for verification",
+      error:
+        "No trusted gateway provided x-ar-io-digest header for manifest verification. " +
+        "Manifest verification requires trusted gateways that return the x-ar-io-digest header on /raw/ endpoints.",
     };
   }
 
@@ -550,13 +543,11 @@ export class ManifestResolver {
 /**
  * Create manifest resolver from configuration
  * @param config Router configuration
- * @param verifier Verifier instance
  * @param logger Logger instance
  * @param verificationProvider Provider for verification gateways
  */
 export function createManifestResolver(
   config: RouterConfig,
-  verifier: Verifier,
   logger: Logger,
   verificationProvider: GatewaysProvider | null,
 ): ManifestResolver {
@@ -576,7 +567,6 @@ export function createManifestResolver(
       config.verification.staticGateways.length > 0
         ? config.verification.staticGateways
         : config.networkGateways.fallbackGateways,
-    verifier,
     cache,
     logger,
   });

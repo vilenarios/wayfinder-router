@@ -216,15 +216,18 @@ export class ArnsResolver {
 
     // All gateways agree
     const txId = successful[0].txId;
-    const minTtl = Math.min(
-      ...successful
-        .filter((r) => r.ttlSeconds !== null)
-        .map((r) => r.ttlSeconds as number),
-    );
+
+    // Calculate minimum TTL from successful resolutions
+    // NOTE: Math.min() with no arguments returns Infinity, and Infinity is truthy,
+    // so we must check array length explicitly to handle the case where all TTLs are null
+    const ttls = successful
+      .filter((r) => r.ttlSeconds !== null)
+      .map((r) => r.ttlSeconds as number);
+    const minTtl = ttls.length > 0 ? Math.min(...ttls) : 300; // Default 5 minutes
 
     const resolution: ArnsResolution = {
       txId,
-      ttlMs: (minTtl || 300) * 1000, // Default 5 minutes
+      ttlMs: minTtl * 1000,
       resolvedAt: Date.now(),
       processId: successful.find((r) => r.processId)?.processId ?? undefined,
     };

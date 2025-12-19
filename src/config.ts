@@ -223,6 +223,15 @@ export function validateConfig(config: RouterConfig): void {
     }
   }
 
+  // Validate consensus threshold
+  // SECURITY: Require at least 2 gateways for consensus to prevent single-gateway attacks
+  if (config.verification.enabled && config.verification.consensusThreshold < 2) {
+    throw new Error(
+      `ARNS_CONSENSUS_THRESHOLD must be at least 2 for security (got ${config.verification.consensusThreshold}). ` +
+        "A single gateway could otherwise dictate ArNS resolutions.",
+    );
+  }
+
   // Validate consensus threshold against gateway count
   if (config.verification.gatewaySource === "top-staked") {
     if (

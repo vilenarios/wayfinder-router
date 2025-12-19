@@ -131,7 +131,6 @@ export function createServer(options: CreateServerOptions) {
   // Uses the same verification gateways as ArNS resolver for trust
   const manifestResolver = createManifestResolver(
     config,
-    verifier,
     logger,
     wayfinderServices.verificationGatewaysProvider,
   );
