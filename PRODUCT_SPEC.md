@@ -1,6 +1,6 @@
 # Wayfinder Router - Product Specification
 
-**Version:** 1.0
+**Version:** 1.2
 **Status:** Draft
 **Last Updated:** December 2024
 
@@ -457,11 +457,12 @@ retry-after: 60
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-13.1 | Router MUST expose `/health` endpoint | P0 |
-| FR-13.2 | Router MUST expose `/ready` endpoint | P0 |
-| FR-13.3 | Router MUST expose `/metrics` endpoint | P0 |
+| FR-13.1 | Router MUST expose `/wayfinder/health` endpoint | P0 |
+| FR-13.2 | Router MUST expose `/wayfinder/ready` endpoint | P0 |
+| FR-13.3 | Router MUST expose `/wayfinder/metrics` endpoint | P0 |
 | FR-13.4 | Health endpoints MUST be excluded from rate limiting | P0 |
-| FR-13.5 | `/ready` MUST verify gateway connectivity | P1 |
+| FR-13.5 | `/wayfinder/ready` MUST verify gateway connectivity | P1 |
+| FR-13.6 | All router endpoints MUST be under `/wayfinder/` prefix | P0 |
 
 #### 6.6.2 Metrics
 
@@ -957,10 +958,12 @@ X-Wayfinder-TxId: bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U
 
 ### 9.3 Health Endpoints
 
+All health endpoints are under the `/wayfinder/` prefix.
+
 #### 9.3.1 Health Check
 
 ```
-GET /health
+GET /wayfinder/health
 ```
 
 **Response:**
@@ -978,7 +981,7 @@ GET /health
 #### 9.3.2 Readiness Check
 
 ```
-GET /ready
+GET /wayfinder/ready
 ```
 
 **Response (Ready):**
@@ -1011,7 +1014,7 @@ GET /ready
 #### 9.3.3 Metrics
 
 ```
-GET /metrics
+GET /wayfinder/metrics
 ```
 
 **Response (Prometheus format):**
@@ -1073,12 +1076,12 @@ wayfinder_gateway_bytes_served_total{gateway="https://arweave.net"} 1073741824
 
 ### 9.4 Telemetry & Stats Endpoints
 
-The router includes a built-in telemetry system for tracking gateway performance. When enabled, it collects request metrics, latency data, and verification results.
+The router includes a built-in telemetry system for tracking gateway performance. When enabled, it collects request metrics, latency data, and verification results. All stats endpoints are under the `/wayfinder/stats/` prefix.
 
 #### 9.4.1 Gateway Stats Summary
 
 ```
-GET /stats/gateways
+GET /wayfinder/stats/gateways
 ```
 
 **Query Parameters:**
@@ -1107,7 +1110,7 @@ GET /stats/gateways
 #### 9.4.2 Gateway List
 
 ```
-GET /stats/gateways/list
+GET /wayfinder/stats/gateways/list
 ```
 
 **Response:**
@@ -1124,7 +1127,7 @@ GET /stats/gateways/list
 #### 9.4.3 Gateway Detail
 
 ```
-GET /stats/gateways/:gateway
+GET /wayfinder/stats/gateways/:gateway
 ```
 
 **Query Parameters:**
@@ -1155,7 +1158,7 @@ GET /stats/gateways/:gateway
 #### 9.4.4 Reward Export
 
 ```
-GET /stats/export
+GET /wayfinder/stats/export
 ```
 
 Exports telemetry data in a format suitable for reward calculations.
@@ -1226,6 +1229,7 @@ Exports telemetry data in a format suitable for reward calculations.
 | `PORT` | integer | `3000` | HTTP server port |
 | `HOST` | string | `0.0.0.0` | Bind address |
 | `BASE_DOMAIN` | string | `localhost` | Base domain for subdomain routing |
+| `ARNS_ROOT_HOST` | string | `` | ArNS name to serve at root domain (empty = show info page) |
 
 #### Mode Configuration
 
@@ -1517,7 +1521,7 @@ services:
       - TELEMETRY_ENABLED=true
       - LOG_LEVEL=info
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/wayfinder/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -1569,13 +1573,13 @@ spec:
             cpu: "1000m"
         livenessProbe:
           httpGet:
-            path: /health
+            path: /wayfinder/health
             port: 3000
           initialDelaySeconds: 10
           periodSeconds: 30
         readinessProbe:
           httpGet:
-            path: /ready
+            path: /wayfinder/ready
             port: 3000
           initialDelaySeconds: 5
           periodSeconds: 10
@@ -1651,7 +1655,7 @@ router.example.com.     A     <load-balancer-ip>
 #### 12.2.3 Load Balancer
 
 - TLS termination at load balancer
-- Health check: `GET /health`
+- Health check: `GET /wayfinder/health`
 - Sticky sessions: Not required (stateless)
 - Timeout: 120 seconds (for large file transfers)
 
@@ -1863,8 +1867,24 @@ router.example.com.     A     <load-balancer-ip>
 - **Gateway Telemetry** ✓
   - SQLite-backed metrics storage
   - Per-gateway performance tracking
-  - Stats API endpoints (/stats/*)
+  - Stats API endpoints (/wayfinder/stats/*)
   - Reward data export
+
+- **Manifest Verification** ✓
+  - Fetches and verifies Arweave path manifests
+  - Verifies path mappings match expected content
+  - Three-layer verification: manifest hash, path mapping, content hash
+  - Caching of verified manifests
+
+- **ArNS Root Host** ✓
+  - Serve any ArNS name at the root domain via `ARNS_ROOT_HOST`
+  - Info page moves to `/wayfinder/info` when configured
+  - All router endpoints consolidated under `/wayfinder/` prefix
+
+- **Security Improvements** ✓
+  - Never trust source gateway digest headers (always verify against trusted gateways)
+  - Minimum consensus threshold of 2 enforced for ArNS resolution
+  - Parallel manifest fetching with Promise.any() for reliability
 
 ### 15.2 Version 1.1
 
@@ -1877,14 +1897,7 @@ router.example.com.     A     <load-balancer-ip>
   - HTTP endpoint for ArNS cache invalidation
   - Selective content cache purge
 
-### 15.3 Version 1.2
-
-- **Manifest Support**
-  - Parse Arweave manifests
-  - Verify all resources in manifest
-  - Serve manifest-based apps
-
-### 15.4 Version 2.0
+### 15.3 Version 2.0
 
 - **WebSocket Support**
   - Proxy WebSocket connections
@@ -1900,7 +1913,7 @@ router.example.com.     A     <load-balancer-ip>
   - Weighted routing
   - Custom routing rules
 
-### 15.5 Future Considerations
+### 15.4 Future Considerations
 
 - Multi-region deployment support
 - A/B testing for gateway selection
@@ -1940,6 +1953,7 @@ router.example.com.     A     <load-balancer-ip>
 |---------|------|--------|---------|
 | 1.0 | Dec 2024 | AR.IO | Initial specification |
 | 1.1 | Dec 2024 | AR.IO | Added telemetry documentation, stats API endpoints, updated config reference, aligned metrics with implementation, updated roadmap |
+| 1.2 | Dec 2024 | AR.IO | Added manifest verification, ARNS_ROOT_HOST configuration, security improvements (never trust source gateway), moved all endpoints to /wayfinder/ prefix, updated deployment examples |
 
 ---
 
