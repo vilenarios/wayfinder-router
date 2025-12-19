@@ -7,8 +7,8 @@
  * - Verification: Uses only trusted gateways (top-staked or static) for hash verification
  */
 
+import { createHash } from "node:crypto";
 import {
-  HashVerificationStrategy,
   TrustedPeersGatewaysProvider,
   SimpleCacheGatewaysProvider,
   FastestPingRoutingStrategy,
@@ -203,23 +203,32 @@ function createVerificationStrategy(
 
   const sdkLogger = createSdkLogger(logger);
 
-  // Use dynamic verification strategy that fetches gateways from provider
-  return new DynamicHashVerificationStrategy({
+  // Use raw endpoint verification strategy that fetches expected hash from /raw/{txId}
+  // This avoids redirect issues with the SDK's HashVerificationStrategy
+  return new RawEndpointVerificationStrategy({
     gatewaysProvider: verificationProvider,
-    maxConcurrency: 2,
     logger: sdkLogger,
+    timeoutMs: 5000,
   });
 }
 
 /**
- * Dynamic hash verification strategy that fetches trusted gateways from a provider
- * This allows using the same top-staked gateways for both routing and verification
+ * Raw endpoint verification strategy that fetches expected hash from /raw/{txId}.
+ *
+ * The SDK's HashVerificationStrategy uses /{txId} which returns a 302 redirect
+ * to a sandbox subdomain. The redirect response lacks the x-ar-io-digest header,
+ * causing verification to fail.
+ *
+ * This strategy uses /raw/{txId} which:
+ * 1. Returns 200 directly (no redirect)
+ * 2. Always includes the x-ar-io-digest header
+ * 3. Returns the raw content without manifest resolution
  */
-class DynamicHashVerificationStrategy implements SdkVerificationStrategy {
+class RawEndpointVerificationStrategy implements SdkVerificationStrategy {
   private gatewaysProvider: GatewaysProvider;
-  private maxConcurrency: number;
   private logger: ReturnType<typeof createSdkLogger>;
   private _cachedGateways: URL[] = [];
+  private timeoutMs: number;
 
   // Required by VerificationStrategy interface - returns cached gateways
   get trustedGateways(): URL[] {
@@ -228,12 +237,12 @@ class DynamicHashVerificationStrategy implements SdkVerificationStrategy {
 
   constructor(options: {
     gatewaysProvider: GatewaysProvider;
-    maxConcurrency: number;
     logger: ReturnType<typeof createSdkLogger>;
+    timeoutMs?: number;
   }) {
     this.gatewaysProvider = options.gatewaysProvider;
-    this.maxConcurrency = options.maxConcurrency;
     this.logger = options.logger;
+    this.timeoutMs = options.timeoutMs ?? 5000;
   }
 
   async verifyData(params: {
@@ -241,6 +250,8 @@ class DynamicHashVerificationStrategy implements SdkVerificationStrategy {
     txId: string;
     headers: Record<string, string>;
   }): Promise<void> {
+    const { data, txId } = params;
+
     // Get current trusted gateways from the provider
     const gateways = await this.gatewaysProvider.getGateways();
 
@@ -251,15 +262,103 @@ class DynamicHashVerificationStrategy implements SdkVerificationStrategy {
     // Cache gateways for the trustedGateways getter
     this._cachedGateways = gateways;
 
-    // Create a HashVerificationStrategy with the current gateways
-    const strategy = new HashVerificationStrategy({
-      trustedGateways: gateways,
-      maxConcurrency: this.maxConcurrency,
-      logger: this.logger,
+    // Consume the stream and compute hash
+    const reader = data.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalSize = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      totalSize += value.length;
+    }
+
+    // Concatenate chunks
+    const fullData = new Uint8Array(totalSize);
+    let offset = 0;
+    for (const chunk of chunks) {
+      fullData.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // Compute SHA-256 hash of received data
+    const computedHash = createHash("sha256")
+      .update(fullData)
+      .digest("base64url");
+
+    this.logger.debug(
+      `Verifying hash for ${txId}: computed ${computedHash}, size ${totalSize}`,
+    );
+
+    // Fetch expected hash from trusted gateways using /raw/ endpoint
+    // Use Promise.any to succeed on first matching hash
+    const verifyPromises = gateways.map(async (gateway) => {
+      const expectedHash = await this.fetchRawDigest(gateway, txId);
+
+      if (!expectedHash) {
+        throw new Error(`No digest header from ${gateway}`);
+      }
+
+      if (computedHash !== expectedHash) {
+        throw new Error(
+          `Hash mismatch from ${gateway}: expected ${expectedHash}, got ${computedHash}`,
+        );
+      }
+
+      this.logger.debug(`Hash verified against ${gateway}: ${computedHash}`);
+
+      return { verified: true, gateway: gateway.toString() };
     });
 
-    // Delegate to the HashVerificationStrategy
-    return strategy.verifyData(params);
+    try {
+      // Return on first successful verification
+      await Promise.any(verifyPromises);
+    } catch (error) {
+      // All gateways failed - throw appropriate error
+      if (error instanceof AggregateError) {
+        const errors = error.errors.map((e) =>
+          e instanceof Error ? e.message : String(e),
+        );
+        throw new Error(
+          `Hash verification failed against all trusted gateways: ${errors.join("; ")}`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch the x-ar-io-digest header from a gateway's /raw/ endpoint.
+   * Uses HEAD request to avoid downloading the full content.
+   */
+  private async fetchRawDigest(
+    gateway: URL,
+    txId: string,
+  ): Promise<string | null> {
+    const url = new URL(gateway);
+    url.pathname = `/raw/${txId}`;
+
+    try {
+      const response = await fetch(url.toString(), {
+        method: "HEAD",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (!response.ok) {
+        this.logger.warn(
+          `Gateway ${gateway} returned ${response.status} for /raw/${txId}`,
+        );
+        return null;
+      }
+
+      return response.headers.get("x-ar-io-digest");
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch digest from ${gateway}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
   }
 }
 
