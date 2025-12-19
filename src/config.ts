@@ -54,25 +54,25 @@ export function loadConfig(): RouterConfig {
   // Verification gateways (static, used when VERIFICATION_GATEWAY_SOURCE=static)
   const verificationStaticGatewaysStr = getEnv(
     "VERIFICATION_STATIC_GATEWAYS",
-    "https://arweave.net,https://ar-io.dev",
+    "https://turbo-gateway.com,https://ardrive.net,https://permagate.io",
   );
 
   // Routing gateways (static, used when ROUTING_GATEWAY_SOURCE=static)
   const routingStaticGatewaysStr = getEnv(
     "ROUTING_STATIC_GATEWAYS",
-    "https://arweave.net,https://ar-io.dev",
+    "https://turbo-gateway.com,https://ardrive.net,https://permagate.io",
   );
 
   // Trusted peer gateway (used when ROUTING_GATEWAY_SOURCE=trusted-peers)
   const trustedPeerGatewayStr = getEnv(
     "TRUSTED_PEER_GATEWAY",
-    "https://arweave.net",
+    "https://turbo-gateway.com",
   );
 
   // Fallback gateways (used when network fetch fails)
   const fallbackGatewaysStr = getEnv(
     "NETWORK_FALLBACK_GATEWAYS",
-    "https://arweave.net,https://ar-io.dev",
+    "https://turbo-gateway.com,https://ardrive.net,https://permagate.io",
   );
 
   return {

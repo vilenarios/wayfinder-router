@@ -594,7 +594,7 @@ retry-after: 60
 │                         AR.IO GATEWAY NETWORK                                 │
 │                                                                              │
 │    ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   │
-│    │  arweave.net│   │  ar-io.dev  │   │ permagate.io│   │  Gateway N  │   │
+│    │turbo-gateway│   │  ardrive.net│   │ permagate.io│   │  Gateway N  │   │
 │    │  (Gateway)  │   │  (Gateway)  │   │  (Gateway)  │   │  (Gateway)  │   │
 │    └─────────────┘   └─────────────┘   └─────────────┘   └─────────────┘   │
 │                                                                              │
@@ -889,7 +889,7 @@ Cache-Control: public, max-age=31536000, immutable
 ETag: "abc123"
 X-Wayfinder-Mode: proxy
 X-Wayfinder-Verified: true
-X-Wayfinder-Gateway: https://arweave.net
+X-Wayfinder-Gateway: https://turbo-gateway.com
 X-Wayfinder-TxId: bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U
 X-Wayfinder-Verification-Time-Ms: 45
 
@@ -901,9 +901,9 @@ X-Wayfinder-Verification-Time-Ms: 45
 
 ```http
 HTTP/1.1 302 Found
-Location: https://ardrive.arweave.net/
+Location: https://ardrive.turbo-gateway.com/
 X-Wayfinder-Mode: route
-X-Wayfinder-Gateway: https://arweave.net
+X-Wayfinder-Gateway: https://turbo-gateway.com
 X-Wayfinder-TxId: bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U
 ```
 
@@ -1053,25 +1053,25 @@ wayfinder_content_cache_items 250
 
 # HELP wayfinder_gateway_requests_total Total requests per gateway
 # TYPE wayfinder_gateway_requests_total counter
-wayfinder_gateway_requests_total{gateway="https://arweave.net",outcome="success"} 5000
-wayfinder_gateway_requests_total{gateway="https://arweave.net",outcome="error"} 50
+wayfinder_gateway_requests_total{gateway="https://turbo-gateway.com",outcome="success"} 5000
+wayfinder_gateway_requests_total{gateway="https://turbo-gateway.com",outcome="error"} 50
 
 # HELP wayfinder_gateway_verifications_total Verification results per gateway
 # TYPE wayfinder_gateway_verifications_total counter
-wayfinder_gateway_verifications_total{gateway="https://arweave.net",outcome="verified"} 4950
-wayfinder_gateway_verifications_total{gateway="https://arweave.net",outcome="failed"} 10
+wayfinder_gateway_verifications_total{gateway="https://turbo-gateway.com",outcome="verified"} 4950
+wayfinder_gateway_verifications_total{gateway="https://turbo-gateway.com",outcome="failed"} 10
 
 # HELP wayfinder_gateway_latency_seconds_sum Sum of request latencies
 # TYPE wayfinder_gateway_latency_seconds_sum counter
-wayfinder_gateway_latency_seconds_sum{gateway="https://arweave.net"} 425.5
+wayfinder_gateway_latency_seconds_sum{gateway="https://turbo-gateway.com"} 425.5
 
 # HELP wayfinder_gateway_latency_seconds_count Count of latency measurements
 # TYPE wayfinder_gateway_latency_seconds_count counter
-wayfinder_gateway_latency_seconds_count{gateway="https://arweave.net"} 5050
+wayfinder_gateway_latency_seconds_count{gateway="https://turbo-gateway.com"} 5050
 
 # HELP wayfinder_gateway_bytes_served_total Total bytes served per gateway
 # TYPE wayfinder_gateway_bytes_served_total counter
-wayfinder_gateway_bytes_served_total{gateway="https://arweave.net"} 1073741824
+wayfinder_gateway_bytes_served_total{gateway="https://turbo-gateway.com"} 1073741824
 ```
 
 ### 9.4 Telemetry & Stats Endpoints
@@ -1094,7 +1094,7 @@ GET /wayfinder/stats/gateways
 ```json
 [
   {
-    "gateway": "https://arweave.net",
+    "gateway": "https://turbo-gateway.com",
     "totalRequests": 1500,
     "successfulRequests": 1480,
     "failedRequests": 20,
@@ -1117,8 +1117,8 @@ GET /wayfinder/stats/gateways/list
 ```json
 {
   "gateways": [
-    "https://arweave.net",
-    "https://ar-io.dev",
+    "https://turbo-gateway.com",
+    "https://ardrive.net",
     "https://permagate.io"
   ]
 }
@@ -1139,7 +1139,7 @@ GET /wayfinder/stats/gateways/:gateway
 **Response:**
 ```json
 {
-  "gateway": "https://arweave.net",
+  "gateway": "https://turbo-gateway.com",
   "summary": {
     "totalRequests": 1500,
     "successfulRequests": 1480,
@@ -1182,7 +1182,7 @@ Exports telemetry data in a format suitable for reward calculations.
   },
   "gateways": [
     {
-      "gateway": "https://arweave.net",
+      "gateway": "https://turbo-gateway.com",
       "metrics": {
         "totalRequests": 1500,
         "successRate": 0.987,
@@ -1243,7 +1243,7 @@ Exports telemetry data in a format suitable for reward calculations.
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `VERIFICATION_ENABLED` | boolean | `true` | Enable data verification |
-| `TRUSTED_GATEWAYS` | string | `https://arweave.net,https://ar-io.dev` | Comma-separated trusted gateway URLs |
+| `TRUSTED_GATEWAYS` | string | `https://turbo-gateway.com,https://ardrive.net` | Comma-separated trusted gateway URLs |
 | `ARNS_CONSENSUS_THRESHOLD` | integer | `2` | Minimum agreeing gateways for ArNS |
 
 #### Routing Configuration
@@ -1252,7 +1252,7 @@ Exports telemetry data in a format suitable for reward calculations.
 |----------|------|---------|-------------|
 | `ROUTING_STRATEGY` | enum | `fastest` | Gateway selection (`fastest`, `random`, `round-robin`) |
 | `GATEWAY_SOURCE` | enum | `trusted-peers` | Gateway discovery (`network`, `trusted-peers`, `static`) |
-| `TRUSTED_PEER_GATEWAY` | string | `https://arweave.net` | Gateway for peer discovery |
+| `TRUSTED_PEER_GATEWAY` | string | `https://turbo-gateway.com` | Gateway for peer discovery |
 | `STATIC_GATEWAYS` | string | | Comma-separated static gateway list |
 
 #### Resilience Configuration
@@ -1329,12 +1329,12 @@ DEFAULT_MODE=proxy
 ALLOW_MODE_OVERRIDE=true
 
 VERIFICATION_ENABLED=true
-TRUSTED_GATEWAYS=https://arweave.net,https://ar-io.dev,https://permagate.io
+TRUSTED_GATEWAYS=https://turbo-gateway.com,https://ardrive.net,https://permagate.io
 ARNS_CONSENSUS_THRESHOLD=2
 
 ROUTING_STRATEGY=fastest
 GATEWAY_SOURCE=trusted-peers
-TRUSTED_PEER_GATEWAY=https://arweave.net
+TRUSTED_PEER_GATEWAY=https://turbo-gateway.com
 
 RETRY_ATTEMPTS=3
 RETRY_DELAY_MS=100
@@ -1497,7 +1497,7 @@ docker run -d \
   -p 3000:3000 \
   -e BASE_DOMAIN=router.example.com \
   -e VERIFICATION_ENABLED=true \
-  -e TRUSTED_GATEWAYS=https://arweave.net,https://ar-io.dev \
+  -e TRUSTED_GATEWAYS=https://turbo-gateway.com,https://ardrive.net \
   -e RATE_LIMIT_ENABLED=true \
   ghcr.io/ar-io/wayfinder-router:latest
 ```
@@ -1515,7 +1515,7 @@ services:
     environment:
       - BASE_DOMAIN=router.example.com
       - VERIFICATION_ENABLED=true
-      - TRUSTED_GATEWAYS=https://arweave.net,https://ar-io.dev
+      - TRUSTED_GATEWAYS=https://turbo-gateway.com,https://ardrive.net
       - ROUTING_STRATEGY=fastest
       - RATE_LIMIT_ENABLED=true
       - TELEMETRY_ENABLED=true
@@ -1730,7 +1730,7 @@ router.example.com.     A     <load-balancer-ip>
   "duration": 45,
   "mode": "proxy",
   "verified": true,
-  "gateway": "https://arweave.net"
+  "gateway": "https://turbo-gateway.com"
 }
 ```
 

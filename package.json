@@ -10,7 +10,10 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "stats": "tsx scripts/show-stats.ts",
+    "clear:telemetry": "tsx scripts/clear-telemetry.ts",
+    "clear:all": "tsx scripts/clear-all.ts"
   },
   "keywords": [
     "arweave",

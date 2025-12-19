@@ -73,8 +73,9 @@ export class NetworkGatewayManager {
     this.refreshIntervalMs = options.refreshIntervalMs ?? 24 * 60 * 60 * 1000; // 24 hours
     this.minGateways = options.minGateways ?? 3;
     this.fallbackGateways = options.fallbackGateways ?? [
-      new URL("https://arweave.net"),
-      new URL("https://ar-io.dev"),
+      new URL("https://turbo-gateway.com"),
+      new URL("https://ardrive.net"),
+      new URL("https://permagate.io"),
     ];
     this.logger = options.logger;
   }
