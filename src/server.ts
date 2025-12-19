@@ -125,7 +125,14 @@ export function createServer(options: CreateServerOptions) {
     logger,
   );
 
-  const contentFetcher = createContentFetcher(gatewaySelector, config, logger);
+  // Pass temperature cache to content fetcher for performance tracking
+  // (only used when routing strategy is "temperature")
+  const contentFetcher = createContentFetcher(
+    gatewaySelector,
+    config,
+    logger,
+    wayfinderServices.temperatureCache ?? undefined,
+  );
 
   // Initialize manifest resolver for verifying path manifests
   // Uses the same verification gateways as ArNS resolver for trust

@@ -18,6 +18,7 @@ export interface CachedContent {
   txId: string;
   hash?: string; // The verified hash
   accessCount: number; // Track popularity
+  lastAccessed: number; // Timestamp of last access
 }
 
 export interface ContentCacheOptions {
@@ -94,6 +95,56 @@ export class ContentCache {
   }
 
   /**
+   * Calculate eviction score for a cache entry.
+   * Lower score = more likely to be evicted.
+   *
+   * Factors considered:
+   * - Recency: Recently accessed items get higher scores
+   * - Popularity: Frequently accessed items get higher scores
+   * - Size: Larger items get slightly lower scores (prefer evicting big items)
+   */
+  private evictionScore(entry: CachedContent): number {
+    const now = Date.now();
+    const ageMs = now - entry.lastAccessed;
+    const ageMinutes = ageMs / 60000;
+
+    // Popularity boost: log scale to prevent outliers from dominating
+    // accessCount 0 = 0, 1 = 1, 10 = 3.3, 100 = 6.6
+    const popularity = Math.log2(entry.accessCount + 1);
+
+    // Recency: decays over time
+    // Items accessed 1 minute ago score higher than items accessed 60 minutes ago
+    const recency = 100 / (ageMinutes + 1);
+
+    // Size penalty: slightly prefer evicting larger items to free more space
+    // Normalized to MB to keep it in reasonable range
+    const sizeMB = entry.data.length / (1024 * 1024);
+    const sizePenalty = sizeMB * 0.5; // Small penalty per MB
+
+    // Combined score: popularity and recency boost, size penalty
+    return popularity * 10 + recency - sizePenalty;
+  }
+
+  /**
+   * Select the best candidate for eviction based on weighted scoring.
+   * Returns the key of the entry with the lowest score.
+   */
+  private selectEvictionCandidate(): string | null {
+    let lowestScore = Infinity;
+    let candidateKey: string | null = null;
+
+    for (const [key, entry] of this.cache.entries()) {
+      const score = this.evictionScore(entry);
+      if (score < lowestScore) {
+        lowestScore = score;
+        candidateKey = key;
+      }
+    }
+
+    return candidateKey;
+  }
+
+  /**
    * Check if cache is enabled
    */
   isEnabled(): boolean {
@@ -112,6 +163,7 @@ export class ContentCache {
     if (cached) {
       this.hits++;
       cached.accessCount++;
+      cached.lastAccessed = Date.now();
       this.logger?.debug("Content cache hit", {
         txId,
         path,
@@ -132,7 +184,7 @@ export class ContentCache {
   set(
     txId: string,
     path: string,
-    content: Omit<CachedContent, "accessCount">,
+    content: Omit<CachedContent, "accessCount" | "lastAccessed">,
   ): boolean {
     if (!this.enabled) return false;
 
@@ -163,22 +215,30 @@ export class ContentCache {
       return false;
     }
 
-    // Evict until we have space
+    // Evict using weighted algorithm until we have space
+    // The algorithm considers: recency, popularity, and size
     while (
       this.currentSizeBytes + contentSize > this.maxSizeBytes &&
       this.cache.size > 0
     ) {
-      // LRU eviction happens automatically, but we track size manually
-      const oldest = this.cache.keys().next().value;
-      if (oldest) {
-        this.cache.delete(oldest);
+      const keyToEvict = this.selectEvictionCandidate();
+      if (keyToEvict) {
+        this.cache.delete(keyToEvict);
+      } else {
+        // Fallback to oldest key if scoring fails
+        const oldest = this.cache.keys().next().value;
+        if (oldest) {
+          this.cache.delete(oldest);
+        }
       }
     }
 
     const key = this.createKey(txId, path);
+    const now = Date.now();
     const fullContent: CachedContent = {
       ...content,
       accessCount: 0,
+      lastAccessed: now,
     };
     this.cache.set(key, fullContent);
     this.currentSizeBytes += contentSize;

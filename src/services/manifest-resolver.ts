@@ -18,6 +18,7 @@ import type {
 import { isArweaveManifest, normalizeManifestPath } from "../types/manifest.js";
 import { ManifestCache } from "../cache/manifest-cache.js";
 import { WayfinderError } from "../middleware/error-handler.js";
+import { RequestDeduplicator } from "../utils/deduplicator.js";
 
 /** Valid Arweave transaction ID pattern (43 chars, base64url) */
 const TXID_REGEX = /^[a-zA-Z0-9_-]{43}$/;
@@ -57,6 +58,22 @@ export class ManifestPathNotFoundError extends WayfinderError {
   }
 }
 
+/**
+ * Internal error for hash mismatch detection during parallel verification
+ * This allows us to distinguish security issues (hash mismatch) from
+ * network issues (gateway unavailable) when using Promise.allSettled
+ */
+class HashMismatchError extends Error {
+  constructor(
+    public readonly gateway: string,
+    public readonly computedHash: string,
+    public readonly expectedHash: string,
+  ) {
+    super(`Hash mismatch from ${gateway}: computed ${computedHash}, expected ${expectedHash}`);
+    this.name = "HashMismatchError";
+  }
+}
+
 export interface ManifestResolverOptions {
   /** Provider for trusted verification gateways */
   gatewaysProvider: GatewaysProvider;
@@ -74,8 +91,8 @@ export class ManifestResolver {
   private logger: Logger;
   private fetchTimeoutMs: number;
 
-  /** In-flight fetch promises for deduplication */
-  private fetchPromises: Map<string, Promise<VerifiedManifest>> = new Map();
+  /** Request deduplicator for in-flight manifest fetches */
+  private deduplicator: RequestDeduplicator<VerifiedManifest>;
 
   constructor(options: ManifestResolverOptions) {
     this.gatewaysProvider = options.gatewaysProvider;
@@ -83,6 +100,10 @@ export class ManifestResolver {
     this.cache = options.cache;
     this.logger = options.logger;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? 30000;
+    this.deduplicator = new RequestDeduplicator<VerifiedManifest>({
+      logger: options.logger,
+      name: "manifest-resolver",
+    });
 
     this.logger.info("ManifestResolver initialized", {
       hasFallbackGateways: this.fallbackGateways.length > 0,
@@ -130,33 +151,23 @@ export class ManifestResolver {
       return cached;
     }
 
-    // Check if there's already an in-flight fetch for this manifest
-    const existingPromise = this.fetchPromises.get(manifestTxId);
-    if (existingPromise) {
-      this.logger.debug("Deduplicating manifest fetch", { manifestTxId });
-      return existingPromise;
-    }
+    // Use deduplicator to ensure only one fetch happens for concurrent requests
+    return this.deduplicator.dedupe(manifestTxId, async () => {
+      // Double-check cache (in case another request cached it while we waited)
+      const cachedAfterWait = this.cache.get(manifestTxId);
+      if (cachedAfterWait) {
+        return cachedAfterWait;
+      }
 
-    // Fetch and verify from trusted gateways
-    this.logger.debug("Fetching manifest from trusted gateways", {
-      manifestTxId,
-    });
-
-    // Create fetch promise and store for deduplication
-    const fetchPromise = this.fetchAndVerifyManifest(manifestTxId)
-      .then((verified) => {
-        // Cache the verified manifest
-        this.cache.set(verified);
-        return verified;
-      })
-      .finally(() => {
-        // Remove from in-flight map when done
-        this.fetchPromises.delete(manifestTxId);
+      // Fetch and verify from trusted gateways
+      this.logger.debug("Fetching manifest from trusted gateways", {
+        manifestTxId,
       });
 
-    this.fetchPromises.set(manifestTxId, fetchPromise);
-
-    return fetchPromise;
+      const verified = await this.fetchAndVerifyManifest(manifestTxId);
+      this.cache.set(verified);
+      return verified;
+    });
   }
 
   /**
@@ -349,15 +360,16 @@ export class ManifestResolver {
   }
 
   /**
-   * Verify manifest hash using /raw/ endpoint
+   * Verify manifest hash using /raw/ endpoint (PARALLEL)
    *
    * SECURITY: We ALWAYS fetch the expected hash from trusted gateways.
    * Never trust the source gateway's x-ar-io-digest header - a malicious
    * gateway could serve bad content with a matching bad digest.
    *
    * 1. Compute SHA-256 hash of received data
-   * 2. Fetch expected hash from trusted gateways via /raw/ endpoint
-   * 3. Compare computed hash vs trusted hash
+   * 2. Fetch expected hash from ALL trusted gateways in parallel
+   * 3. Return success on first matching hash (Promise.any pattern)
+   * 4. Detect hash mismatches as security concerns
    */
   private async verifyManifestHash(
     data: Uint8Array,
@@ -369,58 +381,87 @@ export class ManifestResolver {
     // Compute hash of the manifest data we received
     const computedHash = createHash("sha256").update(data).digest("base64url");
 
-    this.logger.debug("Verifying manifest hash against trusted gateways", {
+    // Filter out source gateway - we need independent verification
+    const eligibleGateways = trustedGateways.filter(
+      (gw) => gw.toString() !== sourceGateway.toString(),
+    );
+
+    if (eligibleGateways.length === 0) {
+      return {
+        verified: false,
+        error: "No trusted gateways available for verification (source gateway excluded)",
+      };
+    }
+
+    this.logger.debug("Verifying manifest hash against trusted gateways (parallel)", {
       manifestTxId,
       sourceGateway: sourceGateway.toString(),
       computedHash,
-      trustedGatewayCount: trustedGateways.length,
+      eligibleGatewayCount: eligibleGateways.length,
     });
 
-    // ALWAYS fetch expected hash from trusted gateways (never trust source)
-    for (const gateway of trustedGateways) {
-      // Skip the source gateway - we need independent verification
-      if (gateway.toString() === sourceGateway.toString()) {
-        continue;
+    // Query all trusted gateways in parallel
+    const verifyPromises = eligibleGateways.map(async (gateway) => {
+      const expectedHash = await this.fetchRawDigest(gateway, manifestTxId);
+
+      if (!expectedHash) {
+        throw new Error(`No digest header from ${gateway}`);
       }
 
-      try {
-        const expectedHash = await this.fetchRawDigest(gateway, manifestTxId);
-        if (expectedHash) {
-          if (computedHash === expectedHash) {
-            this.logger.debug("Manifest verified against trusted gateway", {
-              manifestTxId,
-              verifyGateway: gateway.toString(),
-              hash: computedHash,
-            });
-            return { verified: true, verifiedBy: gateway.toString() };
-          }
-          // Hash mismatch - source gateway may have served bad content
-          this.logger.warn("Manifest hash mismatch - possible tampering", {
-            manifestTxId,
-            sourceGateway: sourceGateway.toString(),
-            computedHash,
-            expectedHash,
-            trustedGateway: gateway.toString(),
-          });
-          return {
-            verified: false,
-            error: `Hash mismatch: computed ${computedHash}, trusted gateway returned ${expectedHash}`,
-          };
-        }
-      } catch (error) {
-        this.logger.debug("Failed to fetch digest from trusted gateway", {
-          manifestTxId,
-          gateway: gateway.toString(),
-          error: error instanceof Error ? error.message : String(error),
-        });
+      if (computedHash !== expectedHash) {
+        // Hash mismatch is a security concern - mark it specially
+        throw new HashMismatchError(
+          gateway.toString(),
+          computedHash,
+          expectedHash,
+        );
       }
+
+      // Hash matches!
+      return { verified: true as const, verifiedBy: gateway.toString() };
+    });
+
+    // Use Promise.allSettled to check for hash mismatches vs network failures
+    const results = await Promise.allSettled(verifyPromises);
+
+    // Check for any successful verification
+    const success = results.find(
+      (r): r is PromiseFulfilledResult<{ verified: true; verifiedBy: string }> =>
+        r.status === "fulfilled",
+    );
+
+    if (success) {
+      this.logger.debug("Manifest verified against trusted gateway", {
+        manifestTxId,
+        verifyGateway: success.value.verifiedBy,
+        hash: computedHash,
+      });
+      return success.value;
     }
 
-    // No trusted gateway returned a digest - cannot verify manifest
-    // NOTE: We intentionally do NOT fall back to SDK verification here.
-    // The SDK's HashVerificationStrategy fetches hashes from /{txId} which
-    // returns the INDEX CONTENT hash for manifests, not the raw manifest hash.
-    // This would always fail for manifests, so we fail explicitly instead.
+    // No success - check if any gateway reported a hash MISMATCH (security issue)
+    // vs all gateways just being unavailable (network issue)
+    const mismatch = results.find(
+      (r): r is PromiseRejectedResult =>
+        r.status === "rejected" && r.reason instanceof HashMismatchError,
+    );
+
+    if (mismatch) {
+      const err = mismatch.reason as HashMismatchError;
+      this.logger.warn("Manifest hash mismatch - possible tampering", {
+        manifestTxId,
+        sourceGateway: sourceGateway.toString(),
+        computedHash: err.computedHash,
+        expectedHash: err.expectedHash,
+        trustedGateway: err.gateway,
+      });
+      return {
+        verified: false,
+        error: `Hash mismatch: computed ${err.computedHash}, trusted gateway ${err.gateway} returned ${err.expectedHash}`,
+      };
+    }
+
+    // All gateways failed with network/timeout errors
     return {
       verified: false,
       error:

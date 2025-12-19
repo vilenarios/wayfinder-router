@@ -33,7 +33,7 @@ export type RequestInfo =
 export type RouterMode = "proxy" | "route";
 
 // Routing strategies
-export type RoutingStrategy = "fastest" | "random" | "round-robin";
+export type RoutingStrategy = "fastest" | "random" | "round-robin" | "temperature";
 
 // Gateway sources for ROUTING (where to fetch data - trust not required)
 export type RoutingGatewaySource = "network" | "trusted-peers" | "static";
@@ -82,6 +82,9 @@ export interface RouterConfig {
     // Retry settings
     retryAttempts: number;
     retryDelayMs: number;
+    // Temperature strategy settings
+    temperatureWindowMs: number;
+    temperatureMaxSamples: number;
   };
 
   // Network gateway settings (shared by routing and verification when using network sources)

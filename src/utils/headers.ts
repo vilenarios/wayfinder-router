@@ -134,7 +134,7 @@ export function extractArnsInfo(headers: Headers): {
     ttlSeconds: headers.get("x-arns-ttl-seconds")
       ? parseInt(headers.get("x-arns-ttl-seconds")!, 10)
       : null,
-    processId: headers.get("x-arns-resolved-process-id"),
+    processId: headers.get("x-arns-process-id"),
   };
 }
 

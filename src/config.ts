@@ -121,6 +121,9 @@ export function loadConfig(): RouterConfig {
       // Retry settings
       retryAttempts: getEnvInt("RETRY_ATTEMPTS", 3),
       retryDelayMs: getEnvInt("RETRY_DELAY_MS", 100),
+      // Temperature strategy settings
+      temperatureWindowMs: getEnvInt("TEMPERATURE_WINDOW_MS", 5 * 60 * 1000), // 5 minutes
+      temperatureMaxSamples: getEnvInt("TEMPERATURE_MAX_SAMPLES", 100),
     },
 
     // Network gateway settings (shared by routing and verification when using network sources)
@@ -257,7 +260,7 @@ export function validateConfig(config: RouterConfig): void {
   // === ROUTING VALIDATION ===
 
   // Validate routing strategy
-  const validStrategies = ["fastest", "random", "round-robin"];
+  const validStrategies = ["fastest", "random", "round-robin", "temperature"];
   if (!validStrategies.includes(config.routing.strategy)) {
     throw new Error(
       `Invalid ROUTING_STRATEGY: ${config.routing.strategy}. Must be one of: ${validStrategies.join(", ")}`,

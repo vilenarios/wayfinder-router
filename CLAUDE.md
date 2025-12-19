@@ -48,8 +48,9 @@ docker run -p 3000:3000 --env-file .env wayfinder-router  # Run production
 1. **Middleware** (`src/middleware/`) - Request parsing, mode selection, rate limiting, error handling
 2. **Handlers** (`src/handlers/`) - proxy.ts (fetch/verify/serve), route.ts (redirect), health.ts, stats.ts
 3. **Services** (`src/services/`) - Core business logic (gateway selection, content fetching, verification, ArNS resolution, manifest resolution)
-4. **Cache** (`src/cache/`) - ArNS cache, gateway health, content cache, manifest cache
+4. **Cache** (`src/cache/`) - ArNS cache, gateway health, content cache, manifest cache, gateway temperature
 5. **Telemetry** (`src/telemetry/`) - Metrics collection and SQLite persistence
+6. **Utils** (`src/utils/`) - Header utilities, URL parsing, request deduplication
 
 ### Code Patterns
 
@@ -101,11 +102,24 @@ When a request includes a subpath (e.g., `/txId/path/to/file`):
 3. Router verifies path mapping matches gateway's response
 4. Router verifies actual content against expected txId from manifest
 
+### Routing Strategies
+
+Four routing strategies determine how gateways are selected for content fetching:
+
+| Strategy | Behavior |
+|----------|----------|
+| `fastest` | Concurrent ping, use first responder |
+| `random` | Random selection from healthy gateways |
+| `round-robin` | Sequential rotation through gateways |
+| `temperature` | Weighted selection based on recent latency and success rate |
+
+The `temperature` strategy uses `GatewayTemperatureCache` to track performance metrics. Gateways with better recent performance have higher probability of selection, but slower gateways still receive some traffic (to detect improvements).
+
 ## Configuration
 
 All configuration via environment variables. See `.env.example` for full list. Key variables:
 
-**Server**: `PORT`, `HOST`, `BASE_DOMAIN`
+**Server**: `PORT`, `HOST`, `BASE_DOMAIN`, `ARNS_ROOT_HOST`
 **Mode**: `DEFAULT_MODE` (`proxy`/`route`), `ALLOW_MODE_OVERRIDE`
 **Verification**: `VERIFICATION_ENABLED`, `VERIFICATION_GATEWAY_SOURCE`, `VERIFICATION_GATEWAY_COUNT`
 **Routing**: `ROUTING_STRATEGY`, `ROUTING_GATEWAY_SOURCE`, `ROUTING_STATIC_GATEWAYS`

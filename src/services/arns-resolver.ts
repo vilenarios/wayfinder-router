@@ -11,6 +11,7 @@ import {
   ArnsConsensusMismatchError,
 } from "../middleware/error-handler.js";
 import { extractArnsInfo } from "../utils/headers.js";
+import { RequestDeduplicator } from "../utils/deduplicator.js";
 
 export interface ArnsResolverOptions {
   /** Provider for trusted verification gateways */
@@ -37,6 +38,9 @@ export class ArnsResolver {
   private cache: ArnsCache;
   private logger: Logger;
 
+  /** Request deduplicator for in-flight ArNS resolutions */
+  private deduplicator: RequestDeduplicator<ArnsResolution>;
+
   constructor(options: ArnsResolverOptions) {
     this.gatewaysProvider = options.gatewaysProvider;
     this.fallbackGateways = options.fallbackGateways;
@@ -46,6 +50,11 @@ export class ArnsResolver {
     this.cache = new ArnsCache({
       defaultTtlMs: options.cacheTtlMs,
       logger: options.logger,
+    });
+
+    this.deduplicator = new RequestDeduplicator<ArnsResolution>({
+      logger: options.logger,
+      name: "arns-resolver",
     });
   }
 
@@ -67,7 +76,8 @@ export class ArnsResolver {
   }
 
   /**
-   * Resolve ArNS name to transaction ID with consensus verification
+   * Resolve ArNS name to transaction ID with consensus verification.
+   * Includes deduplication of concurrent requests for the same name.
    */
   async resolve(arnsName: string): Promise<ArnsResolution> {
     const normalized = arnsName.toLowerCase();
@@ -82,16 +92,25 @@ export class ArnsResolver {
       return cached;
     }
 
-    // Query trusted gateways in parallel
-    const resolutions = await this.queryGateways(normalized);
+    // Use deduplicator to ensure only one resolution happens for concurrent requests
+    return this.deduplicator.dedupe(normalized, async () => {
+      // Double-check cache (in case another request cached it while we waited)
+      const cachedAfterWait = this.cache.get(normalized);
+      if (cachedAfterWait) {
+        return cachedAfterWait;
+      }
 
-    // Check for consensus
-    const resolution = this.checkConsensus(normalized, resolutions);
+      // Query trusted gateways in parallel
+      const resolutions = await this.queryGateways(normalized);
 
-    // Cache the resolution
-    this.cache.set(normalized, resolution);
+      // Check for consensus
+      const resolution = this.checkConsensus(normalized, resolutions);
 
-    return resolution;
+      // Cache the resolution
+      this.cache.set(normalized, resolution);
+
+      return resolution;
+    });
   }
 
   /**

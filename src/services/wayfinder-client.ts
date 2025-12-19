@@ -21,6 +21,9 @@ import {
 
 import type { RouterConfig, Logger, RoutingStrategy } from "../types/index.js";
 import { NetworkGatewayManager } from "./network-gateway-manager.js";
+import { GatewayTemperatureCache } from "../cache/gateway-temperature.js";
+import { GatewayHealthCache } from "../cache/gateway-health.js";
+import { TemperatureRoutingStrategy } from "./routing-strategies/temperature-strategy.js";
 
 export interface WayfinderServices {
   /** Provider for routing gateways (where to fetch data) */
@@ -33,6 +36,8 @@ export interface WayfinderServices {
   verificationStrategy: SdkVerificationStrategy | null;
   /** Network gateway manager (if using network sources) */
   networkGatewayManager: NetworkGatewayManager | null;
+  /** Gateway temperature cache for performance tracking (if using temperature strategy) */
+  temperatureCache: GatewayTemperatureCache | null;
 }
 
 /**
@@ -142,6 +147,8 @@ function createRoutingStrategy(
   strategy: RoutingStrategy,
   gatewaysProvider: GatewaysProvider,
   logger: Logger,
+  temperatureCache: GatewayTemperatureCache | null,
+  healthCache: GatewayHealthCache | null,
 ): SdkRoutingStrategy {
   const sdkLogger = createSdkLogger(logger);
 
@@ -163,6 +170,17 @@ function createRoutingStrategy(
     case "round-robin":
       return new RoundRobinRoutingStrategy({
         gatewaysProvider,
+      });
+
+    case "temperature":
+      if (!temperatureCache) {
+        throw new Error("Temperature cache required for temperature strategy");
+      }
+      return new TemperatureRoutingStrategy({
+        gatewaysProvider,
+        temperatureCache,
+        healthCache: healthCache ?? undefined,
+        logger,
       });
 
     default:
@@ -283,6 +301,7 @@ export function createWayfinderServices(
   config: RouterConfig,
   logger: Logger,
   networkManager: NetworkGatewayManager | null,
+  healthCache?: GatewayHealthCache,
 ): WayfinderServices {
   // Create routing gateways provider
   const routingGatewaysProvider = createRoutingGatewaysProvider(
@@ -298,11 +317,23 @@ export function createWayfinderServices(
     networkManager,
   );
 
+  // Create temperature cache if using temperature strategy
+  const temperatureCache =
+    config.routing.strategy === "temperature"
+      ? new GatewayTemperatureCache({
+          windowMs: config.routing.temperatureWindowMs,
+          maxSamples: config.routing.temperatureMaxSamples,
+          logger,
+        })
+      : null;
+
   // Create routing strategy
   const routingStrategy = createRoutingStrategy(
     config.routing.strategy,
     routingGatewaysProvider,
     logger,
+    temperatureCache,
+    healthCache ?? null,
   );
 
   // Create verification strategy
@@ -322,6 +353,7 @@ export function createWayfinderServices(
         ? config.verification.gatewayCount
         : config.verification.staticGateways.length,
     usesNetworkManager: networkManager !== null,
+    hasTemperatureCache: temperatureCache !== null,
   });
 
   return {
@@ -330,5 +362,6 @@ export function createWayfinderServices(
     routingStrategy,
     verificationStrategy,
     networkGatewayManager: networkManager,
+    temperatureCache,
   };
 }

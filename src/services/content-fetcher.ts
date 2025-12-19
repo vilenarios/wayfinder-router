@@ -5,6 +5,7 @@
 
 import type { Logger, RouterConfig } from "../types/index.js";
 import type { GatewaySelector } from "./gateway-selector.js";
+import type { GatewayTemperatureCache } from "../cache/gateway-temperature.js";
 import { constructGatewayUrl, constructArnsGatewayUrl } from "../utils/url.js";
 import {
   createGatewayRequestHeaders,
@@ -17,6 +18,8 @@ export interface ContentFetcherOptions {
   retryAttempts: number;
   retryDelayMs: number;
   logger: Logger;
+  /** Optional temperature cache for performance tracking */
+  temperatureCache?: GatewayTemperatureCache;
 }
 
 export interface FetchResult {
@@ -45,12 +48,14 @@ export class ContentFetcher {
   private retryAttempts: number;
   private retryDelayMs: number;
   private logger: Logger;
+  private temperatureCache?: GatewayTemperatureCache;
 
   constructor(options: ContentFetcherOptions) {
     this.gatewaySelector = options.gatewaySelector;
     this.retryAttempts = options.retryAttempts;
     this.retryDelayMs = options.retryDelayMs;
     this.logger = options.logger;
+    this.temperatureCache = options.temperatureCache;
   }
 
   /**
@@ -63,6 +68,8 @@ export class ContentFetcher {
     let lastGateway: URL | undefined;
 
     for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
+      const startTime = Date.now();
+
       try {
         // Select a gateway
         const gateway = await this.gatewaySelector.selectForTransaction(
@@ -108,8 +115,14 @@ export class ContentFetcher {
           );
         }
 
+        // Calculate latency and record success
+        const latencyMs = Date.now() - startTime;
+
         // Mark gateway as healthy
         this.gatewaySelector.markHealthy(gateway);
+
+        // Record temperature (latency) for performance tracking
+        this.temperatureCache?.recordSuccess(gateway.toString(), latencyMs);
 
         // Filter response headers
         const filteredHeaders = filterGatewayResponseHeaders(response.headers);
@@ -117,6 +130,7 @@ export class ContentFetcher {
         this.logger.debug("Content fetched successfully", {
           gateway: gateway.toString(),
           txId,
+          latencyMs,
           contentType: response.headers.get("content-type"),
           contentLength: response.headers.get("content-length"),
         });
@@ -132,6 +146,7 @@ export class ContentFetcher {
         // Record failure for the gateway
         if (lastGateway) {
           this.gatewaySelector.recordFailure(lastGateway);
+          this.temperatureCache?.recordFailure(lastGateway.toString());
         }
 
         this.logger.warn("Fetch attempt failed", {
@@ -169,6 +184,8 @@ export class ContentFetcher {
     let lastGateway: URL | undefined;
 
     for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
+      const startTime = Date.now();
+
       try {
         // Select a gateway
         const gateway = await this.gatewaySelector.selectForArns(
@@ -214,8 +231,14 @@ export class ContentFetcher {
           );
         }
 
+        // Calculate latency and record success
+        const latencyMs = Date.now() - startTime;
+
         // Mark gateway as healthy
         this.gatewaySelector.markHealthy(gateway);
+
+        // Record temperature (latency) for performance tracking
+        this.temperatureCache?.recordSuccess(gateway.toString(), latencyMs);
 
         // Filter response headers
         const filteredHeaders = filterGatewayResponseHeaders(response.headers);
@@ -224,6 +247,7 @@ export class ContentFetcher {
           gateway: gateway.toString(),
           arnsName,
           resolvedTxId,
+          latencyMs,
           contentType: response.headers.get("content-type"),
         });
 
@@ -238,6 +262,7 @@ export class ContentFetcher {
         // Record failure for the gateway
         if (lastGateway) {
           this.gatewaySelector.recordFailure(lastGateway);
+          this.temperatureCache?.recordFailure(lastGateway.toString());
         }
 
         this.logger.warn("ArNS fetch attempt failed", {
@@ -280,11 +305,13 @@ export function createContentFetcher(
   gatewaySelector: GatewaySelector,
   config: RouterConfig,
   logger: Logger,
+  temperatureCache?: GatewayTemperatureCache,
 ): ContentFetcher {
   return new ContentFetcher({
     gatewaySelector,
     retryAttempts: config.routing.retryAttempts,
     retryDelayMs: config.routing.retryDelayMs,
     logger,
+    temperatureCache,
   });
 }
