@@ -203,12 +203,13 @@ export function createServer(options: CreateServerOptions) {
     startTime,
   };
 
-  app.get("/health", createHealthHandler(healthDeps));
-  app.get("/ready", createReadyHandler(healthDeps));
+  // All router endpoints are under /wayfinder/ prefix
+  app.get("/wayfinder/health", createHealthHandler(healthDeps));
+  app.get("/wayfinder/ready", createReadyHandler(healthDeps));
 
   // Metrics endpoint (enhanced with telemetry and cache metrics)
   const baseMetricsHandler = createMetricsHandler(healthDeps);
-  app.get("/metrics", async (c) => {
+  app.get("/wayfinder/metrics", async (c) => {
     const baseResponse = await baseMetricsHandler(c);
     let metrics = await baseResponse.text();
 
@@ -232,10 +233,10 @@ export function createServer(options: CreateServerOptions) {
 
   // Stats API endpoints (only when telemetry enabled)
   const statsDeps = { telemetryService, logger };
-  app.get("/stats/gateways", createGatewayStatsHandler(statsDeps));
-  app.get("/stats/gateways/list", createGatewayListHandler(statsDeps));
-  app.get("/stats/gateways/:gateway", createGatewayDetailHandler(statsDeps));
-  app.get("/stats/export", createRewardExportHandler(statsDeps));
+  app.get("/wayfinder/stats/gateways", createGatewayStatsHandler(statsDeps));
+  app.get("/wayfinder/stats/gateways/list", createGatewayListHandler(statsDeps));
+  app.get("/wayfinder/stats/gateways/:gateway", createGatewayDetailHandler(statsDeps));
+  app.get("/wayfinder/stats/export", createRewardExportHandler(statsDeps));
 
   // Main request handler
   app.all("*", async (c) => {
@@ -244,16 +245,6 @@ export function createServer(options: CreateServerOptions) {
 
     // Handle reserved paths
     if (requestInfo.type === "reserved") {
-      // Check for specific reserved paths that are handled by registered routes
-      if (
-        requestInfo.path === "/health" ||
-        requestInfo.path === "/ready" ||
-        requestInfo.path === "/metrics"
-      ) {
-        // Already handled above, this shouldn't happen
-        return c.json({ error: "Not Found" }, 404);
-      }
-
       // Wayfinder info page - available at /wayfinder/info or /wayfinder
       if (
         requestInfo.path === "/wayfinder/info" ||
@@ -266,9 +257,10 @@ export function createServer(options: CreateServerOptions) {
           endpoints: {
             arns: "https://{arnsName}." + config.server.baseDomain,
             txid: "https://" + config.server.baseDomain + "/{txId}",
-            health: "/health",
-            ready: "/ready",
-            metrics: "/metrics",
+            health: "/wayfinder/health",
+            ready: "/wayfinder/ready",
+            metrics: "/wayfinder/metrics",
+            stats: "/wayfinder/stats/gateways",
             info: "/wayfinder/info",
           },
           mode: config.mode.default,
@@ -291,9 +283,10 @@ export function createServer(options: CreateServerOptions) {
           endpoints: {
             arns: "https://{arnsName}." + config.server.baseDomain,
             txid: "https://" + config.server.baseDomain + "/{txId}",
-            health: "/health",
-            ready: "/ready",
-            metrics: "/metrics",
+            health: "/wayfinder/health",
+            ready: "/wayfinder/ready",
+            metrics: "/wayfinder/metrics",
+            stats: "/wayfinder/stats/gateways",
             info: "/wayfinder/info",
           },
           mode: config.mode.default,

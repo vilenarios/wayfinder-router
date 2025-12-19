@@ -86,13 +86,15 @@ Configuration is managed via environment variables. See [.env.example](.env.exam
 
 ## API Endpoints
 
+All router endpoints are under the `/wayfinder/` prefix:
+
 | Endpoint | Description |
 |----------|-------------|
-| `/health` | Health check |
-| `/ready` | Readiness check |
-| `/metrics` | Prometheus metrics |
+| `/wayfinder/health` | Health check |
+| `/wayfinder/ready` | Readiness check |
+| `/wayfinder/metrics` | Prometheus metrics |
 | `/wayfinder/info` | Router info and configuration |
-| `/stats/gateways` | Gateway performance statistics |
+| `/wayfinder/stats/gateways` | Gateway performance statistics |
 
 When `ARNS_ROOT_HOST` is not set, the root endpoint (`/`) also displays router info.
 

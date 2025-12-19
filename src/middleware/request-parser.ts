@@ -9,10 +9,11 @@ import { isTxId, normalizePath, isValidSandbox } from "../utils/url.js";
 
 // Reserved paths that should not be treated as transaction IDs or ArNS paths
 // These are always handled by the router itself
-const RESERVED_PATHS = new Set(["health", "ready", "metrics", "favicon.ico"]);
+const RESERVED_PATHS = new Set(["favicon.ico"]);
 
 // Reserved path prefixes - paths starting with these are always reserved
-const RESERVED_PREFIXES = ["stats/", "wayfinder/"];
+// All router endpoints are under /wayfinder/ (health, ready, metrics, stats, info)
+const RESERVED_PREFIXES = ["wayfinder/"];
 
 /**
  * Check if a path is reserved (should be handled by the router, not proxied)
