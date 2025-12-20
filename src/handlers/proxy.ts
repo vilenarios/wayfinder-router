@@ -316,12 +316,26 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     const manifestInfo = extractManifestInfo(response.headers);
     const isManifest = isManifestResponse(manifestInfo, requestedTxId);
 
-    logger.debug("Checking for manifest response", {
+    // Debug: Log all ar.io headers to diagnose manifest detection
+    const arIoHeaders: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      if (
+        key.toLowerCase().startsWith("x-ar-io-") ||
+        key.toLowerCase().startsWith("x-arns-")
+      ) {
+        arIoHeaders[key] = value;
+      }
+    });
+    logger.info("Gateway response headers", { arIoHeaders, traceId });
+
+    // Log at info level to debug manifest detection issues
+    logger.info("Checking for manifest response", {
       requestedTxId,
       path,
       resolvedId: manifestInfo.resolvedId,
       dataId: manifestInfo.dataId,
       isManifest,
+      requestType,
       traceId,
     });
 
