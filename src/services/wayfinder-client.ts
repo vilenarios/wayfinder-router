@@ -287,8 +287,12 @@ class RawEndpointVerificationStrategy implements SdkVerificationStrategy {
       .update(fullData)
       .digest("base64url");
 
-    this.logger.debug(
-      `Verifying hash for ${txId}: computed ${computedHash}, size ${totalSize}`,
+    // Log content preview for debugging hash mismatches
+    const preview = new TextDecoder()
+      .decode(fullData.slice(0, 100))
+      .replace(/\n/g, "\\n");
+    this.logger.info(
+      `Verifying hash for ${txId}: computed ${computedHash}, size ${totalSize}, preview="${preview}"`,
     );
 
     // Fetch expected hash from trusted gateways using /raw/ endpoint
