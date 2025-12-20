@@ -40,7 +40,10 @@ export function createGatewayRequestHeaders(params: {
   if (params.originalHeaders) {
     const forwardHeaders = [
       "accept",
-      "accept-encoding",
+      // NOTE: We explicitly do NOT forward accept-encoding
+      // Undici's Pool.request() doesn't auto-decompress, so if we allow
+      // compression, we'd hash compressed bytes but compare against
+      // the hash of uncompressed data (x-ar-io-digest), causing mismatches.
       "accept-language",
       "range",
       "if-none-match",
@@ -54,6 +57,10 @@ export function createGatewayRequestHeaders(params: {
       }
     }
   }
+
+  // Request uncompressed content to avoid hash verification issues
+  // When verifying, we need raw bytes that match x-ar-io-digest
+  headers.set("accept-encoding", "identity");
 
   return headers;
 }
