@@ -103,6 +103,8 @@ export function loadConfig(): RouterConfig {
       staticGateways: parseUrls(verificationStaticGatewaysStr),
       // ArNS consensus threshold
       consensusThreshold: getEnvInt("ARNS_CONSENSUS_THRESHOLD", 2),
+      // Number of different gateways to try before giving up on verification
+      retryAttempts: getEnvInt("VERIFICATION_RETRY_ATTEMPTS", 3),
     },
 
     // Routing settings - determines where we fetch data from
@@ -269,6 +271,16 @@ export function validateConfig(config: RouterConfig): void {
     throw new Error(
       `ARNS_CONSENSUS_THRESHOLD must be at least 2 for security (got ${config.verification.consensusThreshold}). ` +
         "A single gateway could otherwise dictate ArNS resolutions.",
+    );
+  }
+
+  // Validate verification retry attempts
+  if (
+    config.verification.retryAttempts < 1 ||
+    config.verification.retryAttempts > 10
+  ) {
+    throw new Error(
+      `VERIFICATION_RETRY_ATTEMPTS must be between 1 and 10, got ${config.verification.retryAttempts}`,
     );
   }
 

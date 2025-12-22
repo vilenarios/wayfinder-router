@@ -71,6 +71,8 @@ export interface RouterConfig {
     staticGateways: URL[];
     // ArNS consensus threshold
     consensusThreshold: number;
+    // Number of different gateways to try before giving up on verification
+    retryAttempts: number;
   };
 
   // Routing settings - determines where we fetch data from

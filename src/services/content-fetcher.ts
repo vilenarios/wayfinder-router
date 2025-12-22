@@ -38,6 +38,8 @@ export interface FetchParams {
   path: string;
   originalHeaders?: Headers;
   traceId?: string;
+  /** Gateways to exclude from selection (e.g., previously failed verification) */
+  excludeGateways?: URL[];
 }
 
 export interface FetchArnsParams {
@@ -46,6 +48,8 @@ export interface FetchArnsParams {
   path: string;
   originalHeaders?: Headers;
   traceId?: string;
+  /** Gateways to exclude from selection (e.g., previously failed verification) */
+  excludeGateways?: URL[];
 }
 
 export class ContentFetcher {
@@ -91,7 +95,13 @@ export class ContentFetcher {
    * Fetch content for a transaction ID
    */
   async fetchByTxId(params: FetchParams): Promise<FetchResult> {
-    const { txId, path, originalHeaders, traceId } = params;
+    const {
+      txId,
+      path,
+      originalHeaders,
+      traceId,
+      excludeGateways = [],
+    } = params;
 
     let lastError: Error | undefined;
     let lastGateway: URL | undefined;
@@ -101,11 +111,12 @@ export class ContentFetcher {
       const startTime = Date.now();
 
       try {
-        // Select a gateway, excluding already-tried ones
+        // Select a gateway, excluding already-tried ones AND externally excluded ones
+        const allExcluded = [...excludeGateways, ...triedGateways];
         const gateway = await this.gatewaySelector.selectForTransaction(
           txId,
           path,
-          triedGateways.length > 0 ? triedGateways : undefined,
+          allExcluded.length > 0 ? allExcluded : undefined,
         );
         lastGateway = gateway;
         triedGateways.push(gateway);
@@ -217,7 +228,14 @@ export class ContentFetcher {
    * Fetch content for an ArNS name (using resolved txId)
    */
   async fetchByArns(params: FetchArnsParams): Promise<FetchResult> {
-    const { arnsName, resolvedTxId, path, originalHeaders, traceId } = params;
+    const {
+      arnsName,
+      resolvedTxId,
+      path,
+      originalHeaders,
+      traceId,
+      excludeGateways = [],
+    } = params;
 
     let lastError: Error | undefined;
     let lastGateway: URL | undefined;
@@ -227,11 +245,12 @@ export class ContentFetcher {
       const startTime = Date.now();
 
       try {
-        // Select a gateway, excluding already-tried ones
+        // Select a gateway, excluding already-tried ones AND externally excluded ones
+        const allExcluded = [...excludeGateways, ...triedGateways];
         const gateway = await this.gatewaySelector.selectForArns(
           arnsName,
           path,
-          triedGateways.length > 0 ? triedGateways : undefined,
+          allExcluded.length > 0 ? allExcluded : undefined,
         );
         lastGateway = gateway;
         triedGateways.push(gateway);

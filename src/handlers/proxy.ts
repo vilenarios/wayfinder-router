@@ -20,7 +20,10 @@ import type {
   TxIdRequestInfo,
 } from "../types/index.js";
 import type { ArnsResolver } from "../services/arns-resolver.js";
-import type { ContentFetcher } from "../services/content-fetcher.js";
+import type {
+  ContentFetcher,
+  FetchResult,
+} from "../services/content-fetcher.js";
 import type { Verifier } from "../services/verifier.js";
 import type { ManifestResolver } from "../services/manifest-resolver.js";
 import type { TelemetryService } from "../telemetry/service.js";
@@ -29,6 +32,8 @@ import type {
   VerificationOutcome,
 } from "../types/telemetry.js";
 import type { ContentCache } from "../cache/content-cache.js";
+import type { GatewayTemperatureCache } from "../cache/gateway-temperature.js";
+import type { GatewaySelector } from "../services/gateway-selector.js";
 import {
   addWayfinderHeaders,
   extractManifestInfo,
@@ -45,6 +50,34 @@ export interface ProxyHandlerDeps {
   logger: Logger;
   telemetryService?: TelemetryService | null;
   contentCache?: ContentCache;
+  /** Temperature cache for recording verification failures */
+  temperatureCache?: GatewayTemperatureCache;
+  /** Gateway selector for recording failures (uses internal health cache) */
+  gatewaySelector?: GatewaySelector;
+}
+
+/**
+ * Represents a verification attempt that failed
+ */
+interface VerificationAttempt {
+  gateway: URL;
+  error: string;
+}
+
+/**
+ * Result of successful fetch and verify
+ */
+interface FetchAndVerifyResult {
+  data: Uint8Array;
+  headers: Headers;
+  gateway: URL;
+  contentTxId: string;
+  manifestTxId: string | null;
+  verificationResult: {
+    durationMs: number;
+    hash?: string;
+    verifiedByGateways?: string[];
+  };
 }
 
 /**
@@ -59,7 +92,226 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     logger,
     telemetryService,
     contentCache,
+    temperatureCache,
+    gatewaySelector,
   } = deps;
+  const { config } = deps;
+
+  /**
+   * Record a verification failure for a gateway.
+   * Verification failures are weighted 3x in health tracking because they
+   * may indicate malicious behavior (serving wrong content).
+   */
+  function recordVerificationFailure(gateway: URL): void {
+    // Record via gateway selector's health cache with 3x weight
+    // This quickly triggers circuit breaker for potentially malicious gateways
+    gatewaySelector?.recordVerificationFailure(gateway);
+
+    // Record in temperature cache for routing decisions
+    temperatureCache?.recordFailure(gateway.toString());
+
+    logger.warn("Recorded verification failure for gateway", {
+      gateway: gateway.toString(),
+    });
+  }
+
+  /**
+   * Fetch and verify content with retry on verification failure.
+   * Tries multiple gateways before giving up.
+   *
+   * @param fetchFn - Function to fetch content, accepts excludeGateways parameter
+   * @param requestedTxId - The requested transaction ID (may be manifest or content)
+   * @param path - The request path
+   * @param traceId - Trace ID for logging
+   * @returns Verified content data with headers
+   */
+  async function fetchAndVerifyWithRetry(
+    fetchFn: (excludeGateways: URL[]) => Promise<FetchResult>,
+    requestedTxId: string,
+    path: string,
+    traceId: string,
+  ): Promise<FetchAndVerifyResult> {
+    const maxAttempts = config.verification.retryAttempts;
+    const failedGateways: URL[] = [];
+    const attempts: VerificationAttempt[] = [];
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Fetch from gateway, excluding previously failed ones
+      const fetchResult = await fetchFn(failedGateways);
+      const { response, gateway, headers } = fetchResult;
+
+      logger.info("Attempting verification", {
+        requestedTxId,
+        gateway: gateway.toString(),
+        attempt: attempt + 1,
+        maxAttempts,
+        previouslyFailed: failedGateways.map((g) => g.toString()),
+        traceId,
+      });
+
+      try {
+        // Determine content txId (may need manifest resolution)
+        const manifestInfo = extractManifestInfo(response.headers);
+        const isManifest = isManifestResponse(manifestInfo, requestedTxId);
+
+        let contentTxId = requestedTxId;
+        let manifestTxId: string | null = null;
+
+        if (isManifest && manifestInfo.dataId) {
+          manifestTxId = manifestInfo.resolvedId || requestedTxId;
+
+          logger.debug("Manifest response detected during retry", {
+            manifestTxId,
+            dataId: manifestInfo.dataId,
+            path,
+            attempt: attempt + 1,
+            traceId,
+          });
+
+          // Verify manifest path mapping
+          const pathResolution = await manifestResolver.resolvePath(
+            manifestTxId,
+            path,
+          );
+
+          if (pathResolution.contentTxId !== manifestInfo.dataId) {
+            throw new Error(
+              `Gateway returned wrong content for manifest path. Expected ${pathResolution.contentTxId}, got ${manifestInfo.dataId}`,
+            );
+          }
+
+          contentTxId = pathResolution.contentTxId;
+        }
+
+        // Check cache before verifying
+        if (contentCache) {
+          const cached = contentCache.get(contentTxId, "");
+          if (cached) {
+            logger.info("Cache hit during retry", {
+              contentTxId,
+              attempt: attempt + 1,
+              traceId,
+            });
+
+            // Discard the fetched response since we're using cache
+            response.body?.cancel().catch(() => {});
+
+            return {
+              data: cached.data,
+              headers: contentCache.toResponse(cached).headers as Headers,
+              gateway,
+              contentTxId,
+              manifestTxId,
+              verificationResult: {
+                durationMs: 0,
+                hash: cached.hash,
+              },
+            };
+          }
+        }
+
+        // Convert response headers to plain object for SDK
+        const headersObj: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          headersObj[key] = value;
+        });
+
+        // Create verification pipeline
+        const { stream, verificationPromise } =
+          verifier.createStreamingVerification(
+            response.body!,
+            contentTxId,
+            headersObj,
+          );
+
+        // Consume stream to get verified data
+        const reader = stream.getReader();
+        const chunks: Uint8Array[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+
+        // Wait for verification to complete
+        const verificationResult = await verificationPromise;
+
+        // Concatenate chunks
+        const totalLength = chunks.reduce(
+          (sum, chunk) => sum + chunk.length,
+          0,
+        );
+        const data = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+          data.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        // Update headers for response
+        headers.delete("content-encoding");
+        headers.set("content-length", String(totalLength));
+
+        logger.info("Verification succeeded", {
+          contentTxId,
+          manifestTxId,
+          gateway: gateway.toString(),
+          attempt: attempt + 1,
+          verificationTimeMs: verificationResult.durationMs,
+          traceId,
+        });
+
+        return {
+          data,
+          headers,
+          gateway,
+          contentTxId,
+          manifestTxId,
+          verificationResult,
+        };
+      } catch (error) {
+        // VERIFICATION FAILED - record and retry
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        failedGateways.push(gateway);
+        attempts.push({ gateway, error: errorMsg });
+
+        logger.warn("Verification failed, will retry with different gateway", {
+          requestedTxId,
+          gateway: gateway.toString(),
+          attempt: attempt + 1,
+          maxAttempts,
+          remainingAttempts: maxAttempts - attempt - 1,
+          error: errorMsg,
+          traceId,
+        });
+
+        // Record verification failure
+        recordVerificationFailure(gateway);
+
+        // Consume/discard any remaining response body
+        response.body?.cancel().catch(() => {});
+
+        // Continue to next iteration
+      }
+    }
+
+    // All attempts exhausted
+    logger.error("All verification attempts failed", {
+      requestedTxId,
+      path,
+      attempts: attempts.map((a) => ({
+        gateway: a.gateway.toString(),
+        error: a.error,
+      })),
+      traceId,
+    });
+
+    throw new Error(
+      `Verification failed after ${maxAttempts} attempts across different gateways: ${attempts.map((a) => `${a.gateway}: ${a.error}`).join("; ")}`,
+    );
+  }
 
   return async (c: Context): Promise<Response> => {
     const requestInfo = c.get("requestInfo") as RequestInfo;
@@ -108,10 +360,103 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       traceId,
     });
 
-    // Note: Cache check happens AFTER manifest resolution in handleVerifiedResponse
-    // because we need to know the actual content txId (which may differ for manifests)
+    // Handle verification if enabled - use retry wrapper
+    if (verifier.enabled) {
+      // Create fetch function that can be retried with gateway exclusion
+      const fetchFn = (excludeGateways: URL[]) =>
+        contentFetcher.fetchByArns({
+          arnsName,
+          resolvedTxId: txId,
+          path,
+          originalHeaders: c.req.raw.headers,
+          traceId,
+          excludeGateways,
+        });
 
-    // Fetch content from gateway
+      // Fetch and verify with retry
+      const result = await fetchAndVerifyWithRetry(
+        fetchFn,
+        txId,
+        path,
+        traceId,
+      );
+
+      // Cache the verified content
+      if (contentCache?.isEnabled()) {
+        const headersForCache: Record<string, string> = {};
+        result.headers.forEach((value, key) => {
+          headersForCache[key] = value;
+        });
+
+        const cached = contentCache.set(result.contentTxId, "", {
+          data: result.data,
+          contentType:
+            result.headers.get("content-type") || "application/octet-stream",
+          contentLength: result.data.length,
+          headers: headersForCache,
+          verifiedAt: Date.now(),
+          txId: result.contentTxId,
+          hash: result.verificationResult.hash,
+        });
+
+        if (cached) {
+          logger.info("Verified content added to cache", {
+            contentTxId: result.contentTxId,
+            manifestTxId: result.manifestTxId,
+            path,
+            size: result.data.length,
+            traceId,
+          });
+        }
+      }
+
+      // Add wayfinder headers
+      addWayfinderHeaders(result.headers, {
+        mode: "proxy",
+        verified: true,
+        routedVia: result.gateway.toString(),
+        verifiedBy: result.verificationResult.verifiedByGateways,
+        txId: result.contentTxId,
+        verificationTimeMs: result.verificationResult.durationMs,
+      });
+
+      if (result.manifestTxId) {
+        result.headers.set("x-wayfinder-manifest-txid", result.manifestTxId);
+      }
+
+      logger.info("ArNS proxy request completed (verified)", {
+        arnsName,
+        contentTxId: result.contentTxId,
+        manifestTxId: result.manifestTxId,
+        gateway: result.gateway.toString(),
+        verified: true,
+        verificationTimeMs: result.verificationResult.durationMs,
+        totalDurationMs: Date.now() - startTime,
+        traceId,
+      });
+
+      // Record successful telemetry
+      recordTelemetryWithVerification({
+        traceId,
+        gateway: result.gateway.toString(),
+        requestType: "arns",
+        identifier: arnsName,
+        path,
+        contentTxId: result.contentTxId,
+        startTime,
+        httpStatus: 200,
+        bytesReceived: result.data.length,
+        verificationOutcome: "verified",
+        verificationDurationMs: result.verificationResult.durationMs,
+      });
+
+      return new Response(result.data, {
+        status: 200,
+        headers: result.headers,
+      });
+    }
+
+    // No verification - pass through directly (single fetch, no retry needed)
     const fetchResult = await contentFetcher.fetchByArns({
       arnsName,
       resolvedTxId: txId,
@@ -122,23 +467,6 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
     const { response, gateway, headers } = fetchResult;
 
-    // Handle verification if enabled
-    if (verifier.enabled && response.body) {
-      return handleVerifiedResponse(
-        c,
-        response,
-        txId,
-        path,
-        gateway,
-        headers,
-        startTime,
-        traceId,
-        "arns",
-        arnsName,
-      );
-    }
-
-    // No verification - pass through directly
     addWayfinderHeaders(headers, {
       mode: "proxy",
       verified: false,
@@ -197,7 +525,6 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
     if (!sandboxSubdomain) {
       // No sandbox subdomain - redirect to sandboxed URL
       const sandbox = sandboxFromTxId(txId);
-      const { config } = deps;
       const protocol = c.req.url.startsWith("https") ? "https" : "http";
       const redirectUrl = `${protocol}://${sandbox}.${config.server.baseDomain}/${txId}${path}`;
 
@@ -228,10 +555,102 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       );
     }
 
-    // Note: Cache check happens AFTER manifest resolution in handleVerifiedResponse
-    // because we need to know the actual content txId (which may differ for manifests)
+    // Handle verification if enabled - use retry wrapper
+    if (verifier.enabled) {
+      // Create fetch function that can be retried with gateway exclusion
+      const fetchFn = (excludeGateways: URL[]) =>
+        contentFetcher.fetchByTxId({
+          txId,
+          path,
+          originalHeaders: c.req.raw.headers,
+          traceId,
+          excludeGateways,
+        });
 
-    // Fetch content from gateway
+      // Fetch and verify with retry
+      const result = await fetchAndVerifyWithRetry(
+        fetchFn,
+        txId,
+        path,
+        traceId,
+      );
+
+      // Cache the verified content
+      if (contentCache?.isEnabled()) {
+        const headersForCache: Record<string, string> = {};
+        result.headers.forEach((value, key) => {
+          headersForCache[key] = value;
+        });
+
+        const cached = contentCache.set(result.contentTxId, "", {
+          data: result.data,
+          contentType:
+            result.headers.get("content-type") || "application/octet-stream",
+          contentLength: result.data.length,
+          headers: headersForCache,
+          verifiedAt: Date.now(),
+          txId: result.contentTxId,
+          hash: result.verificationResult.hash,
+        });
+
+        if (cached) {
+          logger.info("Verified content added to cache", {
+            contentTxId: result.contentTxId,
+            manifestTxId: result.manifestTxId,
+            path,
+            size: result.data.length,
+            traceId,
+          });
+        }
+      }
+
+      // Add wayfinder headers
+      addWayfinderHeaders(result.headers, {
+        mode: "proxy",
+        verified: true,
+        routedVia: result.gateway.toString(),
+        verifiedBy: result.verificationResult.verifiedByGateways,
+        txId: result.contentTxId,
+        verificationTimeMs: result.verificationResult.durationMs,
+      });
+
+      if (result.manifestTxId) {
+        result.headers.set("x-wayfinder-manifest-txid", result.manifestTxId);
+      }
+
+      logger.info("TxId proxy request completed (verified)", {
+        txId,
+        contentTxId: result.contentTxId,
+        manifestTxId: result.manifestTxId,
+        gateway: result.gateway.toString(),
+        verified: true,
+        verificationTimeMs: result.verificationResult.durationMs,
+        totalDurationMs: Date.now() - startTime,
+        traceId,
+      });
+
+      // Record successful telemetry
+      recordTelemetryWithVerification({
+        traceId,
+        gateway: result.gateway.toString(),
+        requestType: "txid",
+        identifier: txId,
+        path,
+        contentTxId: result.contentTxId,
+        startTime,
+        httpStatus: 200,
+        bytesReceived: result.data.length,
+        verificationOutcome: "verified",
+        verificationDurationMs: result.verificationResult.durationMs,
+      });
+
+      return new Response(result.data, {
+        status: 200,
+        headers: result.headers,
+      });
+    }
+
+    // No verification - pass through directly (single fetch, no retry needed)
     const fetchResult = await contentFetcher.fetchByTxId({
       txId,
       path,
@@ -241,23 +660,6 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
     const { response, gateway, headers } = fetchResult;
 
-    // Handle verification if enabled
-    if (verifier.enabled && response.body) {
-      return handleVerifiedResponse(
-        c,
-        response,
-        txId,
-        path,
-        gateway,
-        headers,
-        startTime,
-        traceId,
-        "txid",
-        txId,
-      );
-    }
-
-    // No verification - pass through directly
     addWayfinderHeaders(headers, {
       mode: "proxy",
       verified: false,
@@ -291,316 +693,6 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       status: response.status,
       headers,
     });
-  }
-
-  /**
-   * Handle response with manifest-aware verification
-   * 1. Detects if response is from a manifest (via headers)
-   * 2. If manifest: verifies manifest, verifies path mapping, verifies content
-   * 3. If not manifest: verifies content against requested txId
-   * 4. Checks cache AFTER determining content txId (important for manifest deduplication)
-   */
-  async function handleVerifiedResponse(
-    _c: Context,
-    response: Response,
-    requestedTxId: string,
-    path: string,
-    gateway: URL,
-    headers: Headers,
-    startTime: number,
-    traceId: string,
-    requestType: "arns" | "txid",
-    identifier: string,
-  ): Promise<Response> {
-    // Extract manifest info from gateway response headers
-    const manifestInfo = extractManifestInfo(response.headers);
-    const isManifest = isManifestResponse(manifestInfo, requestedTxId);
-
-    logger.debug("Checking for manifest response", {
-      requestedTxId,
-      path,
-      resolvedId: manifestInfo.resolvedId,
-      dataId: manifestInfo.dataId,
-      isManifest,
-      requestType,
-      traceId,
-    });
-
-    // Determine the expected content txId for verification
-    let contentTxId = requestedTxId;
-    let manifestTxId: string | null = null;
-
-    if (isManifest && manifestInfo.dataId) {
-      // This is a manifest response - we need to verify the path mapping
-      // For ArNS requests, the manifest txId is resolvedId
-      // For txId requests, the manifest txId is the requestedTxId itself
-      manifestTxId = manifestInfo.resolvedId || requestedTxId;
-
-      logger.debug("Manifest response detected, verifying path mapping", {
-        manifestTxId,
-        dataId: manifestInfo.dataId,
-        path,
-        traceId,
-      });
-
-      try {
-        // Get and verify the manifest from trusted gateways
-        const pathResolution = await manifestResolver.resolvePath(
-          manifestTxId,
-          path,
-        );
-
-        logger.debug("Manifest path resolved", {
-          manifestTxId,
-          path,
-          expectedContentTxId: pathResolution.contentTxId,
-          actualDataId: manifestInfo.dataId,
-          isIndex: pathResolution.isIndex,
-          traceId,
-        });
-
-        // Verify that the gateway returned the correct content for this path
-        if (pathResolution.contentTxId !== manifestInfo.dataId) {
-          logger.error(
-            "Manifest path mapping mismatch - gateway may be malicious",
-            {
-              manifestTxId,
-              path,
-              expectedContentTxId: pathResolution.contentTxId,
-              actualDataId: manifestInfo.dataId,
-              traceId,
-            },
-          );
-          throw new Error(
-            `Gateway returned wrong content for manifest path. Expected ${pathResolution.contentTxId}, got ${manifestInfo.dataId}`,
-          );
-        }
-
-        // Use the content txId from manifest for verification
-        contentTxId = pathResolution.contentTxId;
-      } catch (error) {
-        logger.error("Failed to verify manifest path mapping", {
-          manifestTxId,
-          path,
-          error: error instanceof Error ? error.message : String(error),
-          traceId,
-        });
-        throw error;
-      }
-    }
-
-    // NOW we can check the cache - we know the actual content txId
-    // Cache by contentTxId only (not path) since the same content can be accessed via different paths
-    if (contentCache) {
-      const cached = contentCache.get(contentTxId, "");
-      if (cached) {
-        logger.info("Serving verified content from cache", {
-          contentTxId,
-          manifestTxId,
-          path,
-          cacheAge: Date.now() - cached.verifiedAt,
-          traceId,
-        });
-
-        // Record cache hit telemetry
-        recordTelemetry({
-          traceId,
-          gateway: "cache",
-          requestType,
-          identifier,
-          path,
-          outcome: "success",
-          httpStatus: 200,
-          startTime,
-          bytesReceived: cached.contentLength,
-        });
-
-        // We need to consume/discard the response body since we're serving from cache
-        // This prevents memory leaks from unconsumed streams
-        response.body?.cancel().catch(() => {});
-
-        return contentCache.toResponse(cached);
-      }
-    }
-
-    // Cache miss - proceed with content verification
-    return handleContentVerification(
-      response,
-      contentTxId,
-      manifestTxId,
-      path,
-      gateway,
-      headers,
-      startTime,
-      traceId,
-      requestType,
-      identifier,
-    );
-  }
-
-  /**
-   * Handle content verification (post-manifest resolution)
-   * Buffers entire response, verifies against expected txId, caches, then serves
-   */
-  async function handleContentVerification(
-    response: Response,
-    contentTxId: string,
-    manifestTxId: string | null,
-    path: string,
-    gateway: URL,
-    headers: Headers,
-    startTime: number,
-    traceId: string,
-    requestType: "arns" | "txid",
-    identifier: string,
-  ): Promise<Response> {
-    // Convert response headers to plain object for SDK
-    const headersObj: Record<string, string> = {};
-    response.headers.forEach((value, key) => {
-      headersObj[key] = value;
-    });
-
-    // Create verification pipeline (buffers, verifies, then streams)
-    // Use contentTxId (which may be from manifest resolution) for verification
-    const { stream, verificationPromise } =
-      verifier.createStreamingVerification(
-        response.body!,
-        contentTxId,
-        headersObj,
-      );
-
-    try {
-      // Consume the stream to get verified data
-      const reader = stream.getReader();
-      const chunks: Uint8Array[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-
-      // Verification succeeded (stream would have thrown if it failed)
-      const verificationResult = await verificationPromise;
-
-      // Concatenate chunks for response
-      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-      const data = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of chunks) {
-        data.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      // IMPORTANT: Remove content-encoding header since Node.js fetch() auto-decompresses
-      // If we pass through content-encoding: gzip but serve decompressed data,
-      // browsers will fail with ERR_CONTENT_DECODING_FAILED
-      headers.delete("content-encoding");
-      // Update content-length to match actual decompressed size
-      headers.set("content-length", String(totalLength));
-
-      // Add wayfinder headers - include manifest info if applicable
-      addWayfinderHeaders(headers, {
-        mode: "proxy",
-        verified: true,
-        routedVia: gateway.toString(),
-        verifiedBy: verificationResult.verifiedByGateways,
-        txId: contentTxId,
-        verificationTimeMs: verificationResult.durationMs,
-      });
-
-      // Add manifest-specific header if this was a manifest response
-      if (manifestTxId) {
-        headers.set("x-wayfinder-manifest-txid", manifestTxId);
-      }
-
-      logger.info("Proxy request completed (verified)", {
-        contentTxId,
-        manifestTxId,
-        path,
-        gateway: gateway.toString(),
-        verified: true,
-        verificationTimeMs: verificationResult.durationMs,
-        totalDurationMs: Date.now() - startTime,
-        traceId,
-      });
-
-      // Cache the verified content for future requests
-      // Cache key is the content txId (not manifest txId) since content is immutable
-      if (contentCache?.isEnabled()) {
-        const headersForCache: Record<string, string> = {};
-        headers.forEach((value, key) => {
-          headersForCache[key] = value;
-        });
-
-        // Cache by content txId with empty path (content is the same regardless of manifest path)
-        const cached = contentCache.set(contentTxId, "", {
-          data,
-          contentType:
-            headers.get("content-type") || "application/octet-stream",
-          contentLength: totalLength,
-          headers: headersForCache,
-          verifiedAt: Date.now(),
-          txId: contentTxId,
-          hash: verificationResult.hash,
-        });
-
-        if (cached) {
-          logger.info("Verified content added to cache", {
-            contentTxId,
-            manifestTxId,
-            path,
-            size: totalLength,
-            traceId,
-          });
-        }
-      }
-
-      // Record successful telemetry with verification
-      recordTelemetryWithVerification({
-        traceId,
-        gateway: gateway.toString(),
-        requestType,
-        identifier,
-        path,
-        contentTxId,
-        startTime,
-        httpStatus: response.status,
-        bytesReceived: totalLength,
-        verificationOutcome: "verified",
-        verificationDurationMs: verificationResult.durationMs,
-      });
-
-      return new Response(data, {
-        status: response.status,
-        headers,
-      });
-    } catch (error) {
-      // Verification failed - do not serve content
-      logger.error("Verification failed, blocking content", {
-        contentTxId,
-        manifestTxId,
-        path,
-        gateway: gateway.toString(),
-        error: error instanceof Error ? error.message : String(error),
-        traceId,
-      });
-
-      // Record failed verification telemetry
-      recordTelemetryWithVerification({
-        traceId,
-        gateway: gateway.toString(),
-        requestType,
-        identifier,
-        path,
-        contentTxId,
-        startTime,
-        httpStatus: response.status,
-        verificationOutcome: "failed",
-      });
-
-      throw error;
-    }
   }
 
   /**

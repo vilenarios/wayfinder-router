@@ -109,6 +109,28 @@ export class GatewayHealthCache {
    * Record a failure for a gateway
    */
   recordFailure(gateway: URL | string): void {
+    this.recordFailureInternal(gateway, 1, "fetch");
+  }
+
+  /**
+   * Record a verification failure for a gateway.
+   * Verification failures are weighted more heavily than fetch failures
+   * because they may indicate malicious behavior (serving wrong content).
+   */
+  recordVerificationFailure(gateway: URL | string): void {
+    // Verification failures count as 3 regular failures
+    // This quickly triggers circuit breaker for potentially malicious gateways
+    this.recordFailureInternal(gateway, 3, "verification");
+  }
+
+  /**
+   * Internal method to record failures with configurable weight
+   */
+  private recordFailureInternal(
+    gateway: URL | string,
+    weight: number,
+    type: "fetch" | "verification",
+  ): void {
     // Periodically prune to prevent unbounded growth
     this.maybePrune();
 
@@ -128,12 +150,14 @@ export class GatewayHealthCache {
       this.health.set(key, state);
     }
 
-    state.failures++;
+    state.failures += weight;
     state.lastChecked = now;
 
     this.logger?.debug("Gateway failure recorded", {
       gateway: key,
-      failures: state.failures,
+      type,
+      weight,
+      totalFailures: state.failures,
     });
 
     // Check if circuit breaker should open
@@ -144,6 +168,8 @@ export class GatewayHealthCache {
 
       this.logger?.warn("Circuit breaker opened", {
         gateway: key,
+        type,
+        failures: state.failures,
         resetAt: new Date(state.circuitOpenUntil).toISOString(),
       });
     }

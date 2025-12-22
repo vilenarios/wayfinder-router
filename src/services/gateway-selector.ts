@@ -199,6 +199,15 @@ export class GatewaySelector {
   }
 
   /**
+   * Record a verification failure for a gateway.
+   * Verification failures are weighted more heavily than regular failures
+   * because they may indicate malicious behavior (serving wrong content).
+   */
+  recordVerificationFailure(gateway: URL): void {
+    this.healthCache.recordVerificationFailure(gateway);
+  }
+
+  /**
    * Explicitly mark a gateway as unhealthy
    */
   markUnhealthy(gateway: URL, durationMs?: number): void {

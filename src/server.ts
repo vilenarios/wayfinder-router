@@ -411,6 +411,8 @@ export function createServer(options: CreateServerOptions) {
           logger,
           telemetryService,
           contentCache,
+          gatewaySelector,
+          temperatureCache: wayfinderServices.temperatureCache ?? undefined,
         });
         return await proxyHandler(c);
       }
