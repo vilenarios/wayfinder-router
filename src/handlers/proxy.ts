@@ -362,6 +362,71 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
     // Handle verification if enabled - use retry wrapper
     if (verifier.enabled) {
+      // OPTIMIZATION: Check cache BEFORE fetching from gateway
+      // If manifest is cached and content is cached, we can return immediately
+      if (contentCache?.isEnabled()) {
+        try {
+          // Try to resolve path using cached manifest
+          const pathResolution = await manifestResolver.resolvePath(txId, path);
+          const cachedContent = contentCache.get(
+            pathResolution.contentTxId,
+            "",
+          );
+
+          if (cachedContent) {
+            logger.info("Early cache hit - no gateway fetch needed", {
+              arnsName,
+              manifestTxId: txId,
+              contentTxId: pathResolution.contentTxId,
+              path,
+              traceId,
+            });
+
+            const cachedResponse = contentCache.toResponse(cachedContent);
+            const headers = cachedResponse.headers as Headers;
+
+            // Add wayfinder headers
+            addWayfinderHeaders(headers, {
+              mode: "proxy",
+              verified: true,
+              routedVia: "cache",
+              txId: pathResolution.contentTxId,
+              cached: true,
+            });
+
+            headers.set("x-wayfinder-manifest-txid", txId);
+
+            // Record telemetry
+            recordTelemetryWithVerification({
+              traceId,
+              gateway: "cache",
+              requestType: "arns",
+              identifier: arnsName,
+              path,
+              contentTxId: pathResolution.contentTxId,
+              startTime,
+              httpStatus: 200,
+              bytesReceived: cachedContent.data.length,
+              verificationOutcome: "verified",
+              verificationDurationMs: 0,
+            });
+
+            return new Response(cachedContent.data, {
+              status: 200,
+              headers,
+            });
+          }
+        } catch {
+          // Manifest not cached or path not found - proceed with fetch
+          logger.debug("Early cache check failed, proceeding with fetch", {
+            arnsName,
+            txId,
+            path,
+            traceId,
+          });
+        }
+      }
+
       // Create fetch function that can be retried with gateway exclusion
       const fetchFn = (excludeGateways: URL[]) =>
         contentFetcher.fetchByArns({
@@ -557,6 +622,112 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
     // Handle verification if enabled - use retry wrapper
     if (verifier.enabled) {
+      // OPTIMIZATION: Check cache BEFORE fetching from gateway
+      if (contentCache?.isEnabled()) {
+        // For txId requests with a path, try to resolve via cached manifest
+        if (path && path !== "/") {
+          try {
+            const pathResolution = await manifestResolver.resolvePath(
+              txId,
+              path,
+            );
+            const cachedContent = contentCache.get(
+              pathResolution.contentTxId,
+              "",
+            );
+
+            if (cachedContent) {
+              logger.info("Early cache hit - no gateway fetch needed", {
+                txId,
+                manifestTxId: txId,
+                contentTxId: pathResolution.contentTxId,
+                path,
+                traceId,
+              });
+
+              const cachedResponse = contentCache.toResponse(cachedContent);
+              const headers = cachedResponse.headers as Headers;
+
+              addWayfinderHeaders(headers, {
+                mode: "proxy",
+                verified: true,
+                routedVia: "cache",
+                txId: pathResolution.contentTxId,
+                cached: true,
+              });
+
+              headers.set("x-wayfinder-manifest-txid", txId);
+
+              recordTelemetryWithVerification({
+                traceId,
+                gateway: "cache",
+                requestType: "txid",
+                identifier: txId,
+                path,
+                contentTxId: pathResolution.contentTxId,
+                startTime,
+                httpStatus: 200,
+                bytesReceived: cachedContent.data.length,
+                verificationOutcome: "verified",
+                verificationDurationMs: 0,
+              });
+
+              return new Response(cachedContent.data, {
+                status: 200,
+                headers,
+              });
+            }
+          } catch {
+            // Manifest not cached or path not found - proceed with fetch
+            logger.debug("Early cache check failed, proceeding with fetch", {
+              txId,
+              path,
+              traceId,
+            });
+          }
+        } else {
+          // Direct txId request (no path) - check cache directly
+          const cachedContent = contentCache.get(txId, "");
+          if (cachedContent) {
+            logger.info("Early cache hit - no gateway fetch needed", {
+              txId,
+              path,
+              traceId,
+            });
+
+            const cachedResponse = contentCache.toResponse(cachedContent);
+            const headers = cachedResponse.headers as Headers;
+
+            addWayfinderHeaders(headers, {
+              mode: "proxy",
+              verified: true,
+              routedVia: "cache",
+              txId,
+              cached: true,
+            });
+
+            recordTelemetryWithVerification({
+              traceId,
+              gateway: "cache",
+              requestType: "txid",
+              identifier: txId,
+              path,
+              contentTxId: txId,
+              startTime,
+              httpStatus: 200,
+              bytesReceived: cachedContent.data.length,
+              verificationOutcome: "verified",
+              verificationDurationMs: 0,
+            });
+
+            return new Response(cachedContent.data, {
+              status: 200,
+              headers,
+            });
+          }
+        }
+      }
+
       // Create fetch function that can be retried with gateway exclusion
       const fetchFn = (excludeGateways: URL[]) =>
         contentFetcher.fetchByTxId({
