@@ -125,6 +125,8 @@
   - [ ] Copy `.env.production` to `/opt/wayfinder/.env`
   - [ ] Verify all environment variables
   - [ ] Set appropriate permissions (600)
+  - [ ] Generate secure MODERATION_ADMIN_TOKEN (`openssl rand -base64 32`)
+  - [ ] Create data directory for blocklist (`mkdir -p /opt/wayfinder/data`)
 
 - [ ] **Deploy Docker Compose**
   - [ ] Copy `docker-compose.prod.yml` to `/opt/wayfinder/`
@@ -219,6 +221,14 @@
   - [ ] Confirm verification enabled
   - [ ] Test with known valid txId
   - [ ] Test verification failure handling (if possible)
+
+- [ ] **Content Moderation Testing** (if enabled)
+  - [ ] Verify moderation API requires auth token
+  - [ ] Test blocking an ArNS name
+  - [ ] Test blocking a txId
+  - [ ] Verify blocked content returns 403
+  - [ ] Test unblocking content
+  - [ ] Verify blocklist persists after restart
 
 - [ ] **Cache Testing**
   - [ ] Verify CDN cache hit (check headers)
@@ -378,6 +388,30 @@ curl http://localhost:3000/wayfinder/metrics
 
 # Check gateway stats
 curl http://localhost:3000/wayfinder/stats/gateways
+
+# Content Moderation (requires MODERATION_ADMIN_TOKEN)
+# Block an ArNS name
+curl -X POST http://localhost:3000/wayfinder/moderation/block \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"arns","value":"badcontent","reason":"Policy violation","blockedBy":"admin"}'
+
+# Block a txId
+curl -X POST http://localhost:3000/wayfinder/moderation/block \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"txid","value":"abc123...","reason":"DMCA takedown","blockedBy":"legal"}'
+
+# List blocked content
+curl http://localhost:3000/wayfinder/moderation/blocklist \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Check if content is blocked (no auth required)
+curl http://localhost:3000/wayfinder/moderation/check/arns/somename
+
+# Unblock content
+curl -X DELETE http://localhost:3000/wayfinder/moderation/block/arns/badcontent \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ---
