@@ -252,6 +252,64 @@ npm run rewards distribute <id>     # Execute token transfers
 - **Network Growth**: Rewards attract new gateway operators
 - **Transparency**: All calculations published publicly
 
+### Content Moderation System
+
+The content moderation system provides administrative control over what content can be served through the router. This is essential for enterprise deployments that must comply with legal requirements or internal policies.
+
+#### Moderation Flow
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌───────────┐
+│  Admin API  │───▶│  Blocklist  │───▶│   Cache     │───▶│  Request  │
+│  Request    │    │   Service   │    │   Purge     │    │  Blocked  │
+└─────────────┘    └─────────────┘    └─────────────┘    └───────────┘
+     │                   │                   │                  │
+ Bearer Token        Add to Sets        ArNS/Content/       403 Forbidden
+ Auth Required       Persist to File    Manifest Cache
+```
+
+#### Blocking Capabilities
+
+| Type | Description | Effect |
+|------|-------------|--------|
+| ArNS Name | Block by Arweave Name System name | Blocks name + resolved txId |
+| Transaction ID | Block by 43-character txId | Blocks specific content |
+
+#### Key Features
+
+- **Immediate Effect**: Blocked content returns 403 Forbidden instantly
+- **Cache Purging**: Automatically purges ArNS, content, and manifest caches
+- **ArNS Resolution**: When blocking ArNS, automatically resolves and blocks the underlying txId
+- **Hot Reload**: Blocklist file is watched for external changes, reloads without restart
+- **Audit Trail**: Every block includes timestamp, reason, and operator identity
+- **O(1) Lookup**: Uses Sets for constant-time blocking checks
+
+#### Admin API Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/wayfinder/moderation/blocklist` | GET | Bearer | List all blocked items |
+| `/wayfinder/moderation/block` | POST | Bearer | Block ArNS name or txId |
+| `/wayfinder/moderation/block/:type/:value` | DELETE | Bearer | Unblock item |
+| `/wayfinder/moderation/stats` | GET | Bearer | Blocklist statistics |
+| `/wayfinder/moderation/reload` | POST | Bearer | Force reload from file |
+| `/wayfinder/moderation/check/:type/:value` | GET | None | Check if item is blocked |
+
+#### Configuration
+
+```bash
+MODERATION_ENABLED=true
+MODERATION_BLOCKLIST_PATH=./data/blocklist.json
+MODERATION_ADMIN_TOKEN=<secure-random-token>
+```
+
+#### Enterprise Benefits
+
+- **Compliance**: Meet legal takedown requirements (DMCA, court orders)
+- **Policy Enforcement**: Block content violating acceptable use policies
+- **Incident Response**: Rapidly block malicious or harmful content
+- **Audit Trail**: Full record of moderation actions for compliance reporting
+
 #### Phase 4: Decentralized Trust Layer
 Wayfinder becomes **infrastructure for the permanent web**:
 - On-chain verification proofs
@@ -451,6 +509,7 @@ Enterprise Need: Patient records stored permanently with HIPAA compliance
 | FR-008 | GraphQL Proxy | Forward GraphQL queries to Arweave upstream | Medium |
 | FR-009 | Arweave API Proxy | Proxy Arweave node API endpoints | Medium |
 | FR-010 | Root Host Mode | Serve single ArNS/txId at root domain | Medium |
+| FR-011 | Content Moderation | Block ArNS names and transaction IDs with admin controls | High |
 
 ### 2.2 Verification Requirements
 
@@ -475,6 +534,10 @@ Enterprise Need: Patient records stored permanently with HIPAA compliance
 | `/wayfinder/metrics` | GET | Prometheus metrics |
 | `/wayfinder/info` | GET | Router configuration info |
 | `/wayfinder/stats/gateways` | GET | Gateway performance stats |
+| `/wayfinder/moderation/blocklist` | GET | List blocked content (admin) |
+| `/wayfinder/moderation/block` | POST | Block ArNS/txId (admin) |
+| `/wayfinder/moderation/block/:type/:value` | DELETE | Unblock content (admin) |
+| `/wayfinder/moderation/check/:type/:value` | GET | Check if content is blocked |
 | `/graphql` | POST | GraphQL proxy |
 
 ---
@@ -557,6 +620,8 @@ Enterprise Need: Patient records stored permanently with HIPAA compliance
 | SEC-A004 | Input Validation | Strict txId format validation (43-char base64url) |
 | SEC-A005 | Header Sanitization | Strip sensitive headers from responses |
 | SEC-A006 | Error Handling | Generic error messages (no internal details) |
+| SEC-A007 | Content Moderation | Block ArNS names/txIds via admin API with Bearer token auth |
+| SEC-A008 | Blocklist Persistence | JSON file with hot-reload, audit trail for all blocks |
 
 ### 4.3 Infrastructure Security
 
