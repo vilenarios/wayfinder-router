@@ -126,8 +126,8 @@ export class ArweaveApiFetcher {
       const startTime = Date.now();
 
       try {
-        // Select a node
-        const node = this.nodeSelector.select(excludeNodes);
+        // Select a node for read operations (GET requests)
+        const node = this.nodeSelector.select("read", excludeNodes);
         lastNode = node;
 
         // Build full URL

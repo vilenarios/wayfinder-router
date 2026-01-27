@@ -1,8 +1,8 @@
 # Wayfinder Router - Product Specification
 
-**Version:** 1.2
-**Status:** Draft
-**Last Updated:** December 2024
+**Version:** 2.0
+**Status:** Release
+**Last Updated:** January 2026
 
 ---
 
@@ -259,6 +259,73 @@ Users should understand exactly what the router does:
 - Round-robin or weighted routing
 - Health-based exclusion
 
+### 5.6 Blockchain Data Access
+
+**Scenario:** A DeFi application needs to query Arweave chain data (wallet balances, transaction status, block info) through the same trusted endpoint.
+
+**Flow:**
+1. Application requests `https://router.defi.com/wallet/xyz.../balance`
+2. Router recognizes Arweave HTTP API pattern
+3. Router selects healthy Arweave node from configured pool
+4. Router fetches data with retry logic and caching
+5. Application receives chain data with intelligent caching (immutable vs dynamic)
+
+**Requirements:**
+- Arweave HTTP API proxy enabled
+- Separate read/write node pools
+- Category-aware caching (transactions immutable, balances dynamic)
+- Round-robin node selection with failover
+
+### 5.7 Content Compliance & Moderation
+
+**Scenario:** An enterprise must comply with DMCA takedown requests or regulatory requirements to block specific content.
+
+**Flow:**
+1. Compliance team receives takedown request for ArNS name "bad-content"
+2. Admin uses moderation API to block the ArNS name
+3. Router automatically resolves and blocks the underlying txId
+4. Router purges content from all caches immediately
+5. Subsequent requests return 404 with compliance message
+6. Blocklist persists to file and hot-reloads on changes
+
+**Requirements:**
+- Content moderation enabled with admin token
+- Blocklist persistence with file watching
+- Automatic ArNS-to-txId resolution at block time
+- Cache purging on block action
+
+### 5.8 GraphQL Query Proxy
+
+**Scenario:** A frontend application needs to query Arweave transaction metadata via GraphQL through the same trusted domain.
+
+**Flow:**
+1. Frontend sends GraphQL query to `https://router.app.com/graphql`
+2. Router proxies request to configured upstream GraphQL endpoint
+3. Response returned with upstream indicator header
+4. Frontend receives GraphQL data without CORS issues
+
+**Requirements:**
+- GraphQL proxy URL configured
+- Support for both GET and POST methods
+- Upstream indicator in response headers
+
+### 5.9 Single-Application Hosting
+
+**Scenario:** An organization wants to host a single Arweave application at their root domain without exposing general gateway functionality.
+
+**Flow:**
+1. Configure router with `ROOT_HOST_CONTENT=myapp` and `RESTRICT_TO_ROOT_HOST=true`
+2. Users visit `https://myapp.company.com/` - serves the application
+3. Users visit `https://myapp.company.com/assets/style.css` - serves application assets
+4. Attempts to access `https://other.myapp.company.com/` - returns 404
+5. Attempts to access `https://myapp.company.com/{txId}` - returns 404
+6. Management endpoints (`/wayfinder/*`) still accessible
+
+**Requirements:**
+- Root host content configured (ArNS name or txId)
+- Restriction mode enabled
+- Management endpoints always accessible
+
 ---
 
 ## 6. Functional Requirements
@@ -306,9 +373,12 @@ Users should understand exactly what the router does:
 | FR-3.2 | "Fastest" strategy MUST select gateway with lowest latency | P0 |
 | FR-3.3 | "Random" strategy MUST randomly select from healthy gateways | P1 |
 | FR-3.4 | "Round-robin" strategy MUST cycle through gateways sequentially | P1 |
-| FR-3.5 | Unhealthy gateways MUST be excluded from selection | P0 |
-| FR-3.6 | Gateway health MUST be determined by recent request success | P0 |
-| FR-3.7 | Gateway selection strategy MUST be configurable | P0 |
+| FR-3.5 | "Temperature" strategy MUST use weighted selection based on recent performance | P1 |
+| FR-3.6 | Unhealthy gateways MUST be excluded from selection | P0 |
+| FR-3.7 | Gateway health MUST be determined by recent request success | P0 |
+| FR-3.8 | Gateway selection strategy MUST be configurable | P0 |
+| FR-3.9 | Temperature strategy MUST track latency and success rate per gateway | P1 |
+| FR-3.10 | Temperature strategy MUST still route some traffic to slower gateways | P1 |
 
 ### 6.2 Operating Modes
 
@@ -474,6 +544,130 @@ retry-after: 60
 | FR-14.4 | Metrics MUST include verification success/failure counts | P0 |
 | FR-14.5 | Metrics MUST include gateway health status | P0 |
 | FR-14.6 | Metrics MUST include cache hit/miss rates | P1 |
+
+### 6.7 Arweave HTTP API Proxy
+
+The router can proxy Arweave node HTTP API requests for blockchain data access.
+
+#### 6.7.1 Supported Endpoints
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-15.1 | Router MUST proxy `/info` endpoint for network info | P0 |
+| FR-15.2 | Router MUST proxy `/tx/{txId}` endpoint for transaction data | P0 |
+| FR-15.3 | Router MUST proxy `/tx/{txId}/status` for confirmation status | P0 |
+| FR-15.4 | Router MUST proxy `/tx/{txId}/{field}` for transaction fields | P1 |
+| FR-15.5 | Router MUST proxy `/tx/{txId}/data` for transaction data | P1 |
+| FR-15.6 | Router MUST proxy `/wallet/{address}/balance` for wallet balances | P0 |
+| FR-15.7 | Router MUST proxy `/wallet/{address}/last_tx` for last transaction | P1 |
+| FR-15.8 | Router MUST proxy `/block/height/{height}` for blocks by height | P1 |
+| FR-15.9 | Router MUST proxy `/block/hash/{hash}` for blocks by hash | P1 |
+| FR-15.10 | Router MUST proxy `/peers` for peer list | P2 |
+| FR-15.11 | Router MUST proxy `/price/{bytes}` for data pricing | P2 |
+| FR-15.12 | Arweave API MUST be disabled by default | P0 |
+
+#### 6.7.2 Node Selection
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-16.1 | Router MUST support separate read and write node pools | P1 |
+| FR-16.2 | Router MUST use round-robin selection across nodes | P0 |
+| FR-16.3 | Router MUST retry failed requests on different nodes | P0 |
+| FR-16.4 | Router MUST support configurable retry attempts | P1 |
+
+#### 6.7.3 Arweave API Caching
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-17.1 | Router MUST support category-aware caching | P0 |
+| FR-17.2 | Immutable data (transactions, blocks) MUST have long TTL | P0 |
+| FR-17.3 | Dynamic data (info, balances, status) MUST have short TTL | P0 |
+| FR-17.4 | Cache TTLs MUST be independently configurable | P1 |
+| FR-17.5 | Cache size MUST be configurable | P1 |
+
+### 6.8 Content Moderation
+
+The router supports blocking content for compliance purposes.
+
+#### 6.8.1 Blocklist Management
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-18.1 | Router MUST support blocking by ArNS name | P0 |
+| FR-18.2 | Router MUST support blocking by transaction ID | P0 |
+| FR-18.3 | Blocking ArNS MUST also block the resolved txId | P0 |
+| FR-18.4 | Blocklist MUST persist to file | P0 |
+| FR-18.5 | Blocklist file changes MUST trigger hot reload | P1 |
+| FR-18.6 | Blocked requests MUST return 404 | P0 |
+| FR-18.7 | Content moderation MUST be disabled by default | P0 |
+
+#### 6.8.2 Admin API
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-19.1 | Admin API MUST require authentication token | P0 |
+| FR-19.2 | Admin API MUST support adding blocks | P0 |
+| FR-19.3 | Admin API MUST support removing blocks | P0 |
+| FR-19.4 | Admin API MUST support listing all blocks | P1 |
+| FR-19.5 | Admin API MUST return blocklist statistics | P1 |
+| FR-19.6 | Blocking MUST purge content from caches | P0 |
+
+### 6.9 GraphQL Proxy
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-20.1 | Router MUST support proxying `/graphql` to upstream | P1 |
+| FR-20.2 | GraphQL proxy MUST support GET and POST methods | P1 |
+| FR-20.3 | GraphQL proxy MUST include upstream indicator header | P2 |
+| FR-20.4 | GraphQL proxy MUST be disabled by default | P0 |
+| FR-20.5 | GraphQL proxy MUST return 404 when not configured | P0 |
+
+### 6.10 Root Host Configuration
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-21.1 | Router MUST support serving content at root domain | P0 |
+| FR-21.2 | Root host content MUST accept ArNS name | P0 |
+| FR-21.3 | Root host content MUST accept transaction ID | P0 |
+| FR-21.4 | Router MUST auto-detect ArNS vs txId (43-char base64url = txId) | P1 |
+| FR-21.5 | Router MUST support restriction mode | P0 |
+| FR-21.6 | Restriction mode MUST block subdomain requests | P0 |
+| FR-21.7 | Restriction mode MUST block txId path requests | P0 |
+| FR-21.8 | Restriction mode MUST allow `/wayfinder/*` endpoints | P0 |
+| FR-21.9 | Restriction mode MUST allow root host path navigation | P0 |
+
+### 6.11 Gateway Ping Service
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-22.1 | Router MAY periodically ping gateways for health | P2 |
+| FR-22.2 | Ping service MUST only run with temperature routing strategy | P1 |
+| FR-22.3 | Ping interval MUST be configurable | P2 |
+| FR-22.4 | Number of gateways to ping MUST be configurable | P2 |
+| FR-22.5 | Ping timeout MUST be configurable | P2 |
+| FR-22.6 | Ping concurrency MUST be configurable | P2 |
+| FR-22.7 | Ping results MUST update temperature cache | P1 |
+
+### 6.12 HTTP Connection Pooling
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-23.1 | Router MUST use connection pooling for gateway requests | P0 |
+| FR-23.2 | Connections per host MUST be configurable | P1 |
+| FR-23.3 | Connection timeout MUST be configurable | P1 |
+| FR-23.4 | Keep-alive timeout MUST be configurable | P1 |
+| FR-23.5 | Request timeout MUST be configurable | P1 |
+
+### 6.13 Graceful Shutdown
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-24.1 | Router MUST handle SIGTERM/SIGINT gracefully | P0 |
+| FR-24.2 | Router MUST stop accepting new requests during shutdown | P0 |
+| FR-24.3 | Router MUST drain in-flight requests before stopping | P0 |
+| FR-24.4 | Drain timeout MUST be configurable | P1 |
+| FR-24.5 | Shutdown timeout MUST be configurable | P1 |
+| FR-24.6 | Router MUST return 503 for requests during shutdown | P0 |
 
 ---
 
@@ -1194,9 +1388,298 @@ Exports telemetry data in a format suitable for reward calculations.
 }
 ```
 
-### 9.5 Response Headers Reference
+### 9.5 Arweave HTTP API Endpoints
 
-#### 9.5.1 Wayfinder Headers
+When `ARWEAVE_API_ENABLED=true`, the router proxies Arweave node HTTP API requests.
+
+#### 9.5.1 Network Info
+
+```
+GET /info
+```
+
+**Response:**
+```json
+{
+  "network": "arweave.N.1",
+  "version": 5,
+  "release": 68,
+  "height": 1400000,
+  "current": "hW8h5pXBmqp...",
+  "blocks": 1400000,
+  "peers": 1500,
+  "queue_length": 0,
+  "node_state_latency": 0
+}
+```
+
+#### 9.5.2 Transaction Data
+
+```
+GET /tx/{txId}
+```
+
+**Response:**
+```json
+{
+  "format": 2,
+  "id": "bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U",
+  "last_tx": "xyz...",
+  "owner": "abc...",
+  "tags": [],
+  "target": "",
+  "quantity": "0",
+  "data_size": "12345",
+  "signature": "..."
+}
+```
+
+#### 9.5.3 Transaction Status
+
+```
+GET /tx/{txId}/status
+```
+
+**Response:**
+```json
+{
+  "block_height": 1400000,
+  "block_indep_hash": "abc...",
+  "number_of_confirmations": 50
+}
+```
+
+#### 9.5.4 Transaction Field
+
+```
+GET /tx/{txId}/{field}
+```
+
+**Fields:** `id`, `last_tx`, `owner`, `tags`, `target`, `quantity`, `data_size`, `signature`
+
+**Response:** Raw field value
+
+#### 9.5.5 Wallet Balance
+
+```
+GET /wallet/{address}/balance
+```
+
+**Response:**
+```
+1000000000000
+```
+
+(Balance in winston, 1 AR = 10^12 winston)
+
+#### 9.5.6 Last Transaction
+
+```
+GET /wallet/{address}/last_tx
+```
+
+**Response:**
+```
+bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U
+```
+
+#### 9.5.7 Block by Height
+
+```
+GET /block/height/{height}
+```
+
+**Response:**
+```json
+{
+  "nonce": "...",
+  "previous_block": "...",
+  "timestamp": 1640000000,
+  "height": 1400000,
+  "hash": "...",
+  "txs": ["txId1", "txId2"]
+}
+```
+
+#### 9.5.8 Block by Hash
+
+```
+GET /block/hash/{hash}
+```
+
+**Response:** Same as block by height
+
+#### 9.5.9 Network Peers
+
+```
+GET /peers
+```
+
+**Response:**
+```json
+["1.2.3.4:1984", "5.6.7.8:1984"]
+```
+
+#### 9.5.10 Data Price
+
+```
+GET /price/{bytes}
+```
+
+**Response:**
+```
+123456789
+```
+
+(Price in winston for storing {bytes} bytes)
+
+### 9.6 GraphQL Proxy
+
+When `GRAPHQL_PROXY_URL` is configured, the router proxies GraphQL requests.
+
+```
+POST /graphql
+GET /graphql
+```
+
+**Request (POST):**
+```json
+{
+  "query": "query { transactions(first: 10) { edges { node { id } } } }",
+  "variables": {}
+}
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "transactions": {
+      "edges": [
+        { "node": { "id": "txId1" } },
+        { "node": { "id": "txId2" } }
+      ]
+    }
+  }
+}
+```
+
+**Response Headers:**
+```
+x-wayfinder-graphql-upstream: https://arweave.net/graphql
+```
+
+**Error (Not Configured):**
+```json
+{
+  "error": "GraphQL proxy not configured"
+}
+```
+
+### 9.7 Content Moderation API
+
+When `MODERATION_ENABLED=true`, admin endpoints are available for managing blocked content.
+
+#### 9.7.1 Block Content
+
+```
+POST /wayfinder/admin/block
+Authorization: Bearer {MODERATION_ADMIN_TOKEN}
+```
+
+**Request:**
+```json
+{
+  "type": "arns",
+  "value": "bad-content",
+  "reason": "DMCA takedown request #12345",
+  "blockedBy": "compliance@company.com"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "blocked": {
+    "type": "arns",
+    "value": "bad-content",
+    "resolvedTxId": "abc123...",
+    "purgedFromCache": true
+  }
+}
+```
+
+#### 9.7.2 Unblock Content
+
+```
+DELETE /wayfinder/admin/block
+Authorization: Bearer {MODERATION_ADMIN_TOKEN}
+```
+
+**Request:**
+```json
+{
+  "type": "arns",
+  "value": "bad-content"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "unblocked": {
+    "type": "arns",
+    "value": "bad-content"
+  }
+}
+```
+
+#### 9.7.3 List Blocked Content
+
+```
+GET /wayfinder/admin/blocklist
+Authorization: Bearer {MODERATION_ADMIN_TOKEN}
+```
+
+**Response:**
+```json
+{
+  "entries": [
+    {
+      "type": "arns",
+      "value": "bad-content",
+      "reason": "DMCA takedown request #12345",
+      "blockedAt": "2026-01-15T10:30:00Z",
+      "blockedBy": "compliance@company.com",
+      "resolvedTxId": "abc123..."
+    }
+  ]
+}
+```
+
+#### 9.7.4 Blocklist Statistics
+
+```
+GET /wayfinder/admin/blocklist/stats
+Authorization: Bearer {MODERATION_ADMIN_TOKEN}
+```
+
+**Response:**
+```json
+{
+  "totalEntries": 15,
+  "arnsCount": 10,
+  "txIdCount": 5,
+  "lastUpdated": "2026-01-15T10:30:00Z",
+  "filePath": "./data/blocklist.json"
+}
+```
+
+### 9.8 Response Headers Reference
+
+#### 9.8.1 Wayfinder Headers
 
 | Header | Values | Description |
 |--------|--------|-------------|
@@ -1206,8 +1689,11 @@ Exports telemetry data in a format suitable for reward calculations.
 | `x-wayfinder-txid` | 43-char string | Resolved transaction ID |
 | `x-wayfinder-verification-time-ms` | integer | Verification duration |
 | `x-wayfinder-cached` | `true` | Present if served from cache |
+| `x-wayfinder-arns-name` | string | Resolved ArNS name (if applicable) |
+| `x-wayfinder-verified-by` | URL list | Gateways that provided verification |
+| `x-wayfinder-graphql-upstream` | URL | GraphQL upstream endpoint |
 
-#### 9.5.2 Rate Limit Headers
+#### 9.8.2 Rate Limit Headers
 
 | Header | Description |
 |--------|-------------|
@@ -1229,7 +1715,10 @@ Exports telemetry data in a format suitable for reward calculations.
 | `PORT` | integer | `3000` | HTTP server port |
 | `HOST` | string | `0.0.0.0` | Bind address |
 | `BASE_DOMAIN` | string | `localhost` | Base domain for subdomain routing |
-| `ARNS_ROOT_HOST` | string | `` | ArNS name to serve at root domain (empty = show info page) |
+| `ROOT_HOST_CONTENT` | string | `` | Content to serve at root domain (ArNS name or txId, auto-detected) |
+| `ARNS_ROOT_HOST` | string | `` | **Deprecated:** Use `ROOT_HOST_CONTENT` instead |
+| `RESTRICT_TO_ROOT_HOST` | boolean | `false` | When true, blocks subdomain/txId requests, only serves root content |
+| `GRAPHQL_PROXY_URL` | string | `` | Upstream GraphQL endpoint URL (empty = disabled) |
 
 #### Mode Configuration
 
@@ -1243,37 +1732,67 @@ Exports telemetry data in a format suitable for reward calculations.
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `VERIFICATION_ENABLED` | boolean | `true` | Enable data verification |
-| `TRUSTED_GATEWAYS` | string | `https://turbo-gateway.com,https://ardrive.net` | Comma-separated trusted gateway URLs |
-| `ARNS_CONSENSUS_THRESHOLD` | integer | `2` | Minimum agreeing gateways for ArNS |
+| `VERIFICATION_GATEWAY_SOURCE` | enum | `top-staked` | Verification gateway source (`top-staked`, `static`) |
+| `VERIFICATION_GATEWAY_COUNT` | integer | `3` | Number of top-staked gateways (when source is `top-staked`) |
+| `VERIFICATION_STATIC_GATEWAYS` | string | `https://turbo-gateway.com,...` | Comma-separated static verification gateway URLs |
+| `VERIFICATION_RETRY_ATTEMPTS` | integer | `3` | Max verification attempts with different gateways |
+| `ARNS_CONSENSUS_THRESHOLD` | integer | `2` | Minimum agreeing gateways for ArNS (must be ≥ 2) |
 
 #### Routing Configuration
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `ROUTING_STRATEGY` | enum | `fastest` | Gateway selection (`fastest`, `random`, `round-robin`) |
-| `GATEWAY_SOURCE` | enum | `trusted-peers` | Gateway discovery (`network`, `trusted-peers`, `static`) |
-| `TRUSTED_PEER_GATEWAY` | string | `https://turbo-gateway.com` | Gateway for peer discovery |
-| `STATIC_GATEWAYS` | string | | Comma-separated static gateway list |
+| `ROUTING_STRATEGY` | enum | `fastest` | Gateway selection (`fastest`, `random`, `round-robin`, `temperature`) |
+| `ROUTING_GATEWAY_SOURCE` | enum | `network` | Gateway discovery (`network`, `trusted-peers`, `static`, `trusted-ario`) |
+| `TRUSTED_PEER_GATEWAY` | string | `https://turbo-gateway.com` | Gateway for peer discovery (when source is `trusted-peers`) |
+| `ROUTING_STATIC_GATEWAYS` | string | `` | Comma-separated static routing gateway URLs |
+| `TRUSTED_ARIO_GATEWAYS` | string | `` | Comma-separated trusted ar.io gateways (when source is `trusted-ario`) |
+| `RETRY_ATTEMPTS` | integer | `3` | Max retry attempts per request |
+| `RETRY_DELAY_MS` | integer | `100` | Base delay between retries (ms) |
+
+#### Network Gateway Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `NETWORK_GATEWAY_REFRESH_MS` | integer | `86400000` | Gateway list refresh interval (24h) |
+| `NETWORK_MIN_GATEWAYS` | integer | `3` | Minimum healthy gateways required |
+| `NETWORK_FALLBACK_GATEWAYS` | string | `https://turbo-gateway.com,...` | Fallback gateways if network fetch fails |
+
+#### Temperature Strategy Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `TEMPERATURE_WINDOW_MS` | integer | `300000` | Time window for performance tracking (5 min) |
+| `TEMPERATURE_MAX_SAMPLES` | integer | `100` | Max samples per gateway in window |
 
 #### Resilience Configuration
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `RETRY_ATTEMPTS` | integer | `3` | Max retry attempts per request |
-| `RETRY_DELAY_MS` | integer | `100` | Base delay between retries |
-| `GATEWAY_HEALTH_TTL_MS` | integer | `300000` | Health status cache duration |
+| `GATEWAY_HEALTH_TTL_MS` | integer | `300000` | Health status cache duration (5 min) |
+| `GATEWAY_HEALTH_MAX_ENTRIES` | integer | `1000` | Max entries in gateway health cache |
 | `CIRCUIT_BREAKER_THRESHOLD` | integer | `3` | Failures before circuit opens |
-| `CIRCUIT_BREAKER_RESET_MS` | integer | `60000` | Circuit reset timeout |
+| `CIRCUIT_BREAKER_RESET_MS` | integer | `60000` | Circuit reset timeout (1 min) |
+| `STREAM_TIMEOUT_MS` | integer | `120000` | Per-chunk stream timeout (2 min) |
 
 #### Cache Configuration
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `ARNS_CACHE_TTL_MS` | integer | `300000` | ArNS resolution cache TTL |
+| `ARNS_CACHE_TTL_MS` | integer | `300000` | ArNS resolution cache TTL (5 min) |
 | `CONTENT_CACHE_ENABLED` | boolean | `true` | Enable verified content caching |
 | `CONTENT_CACHE_MAX_SIZE_BYTES` | integer | `53687091200` | Max content cache size (50GB) |
 | `CONTENT_CACHE_MAX_ITEM_SIZE_BYTES` | integer | `2147483648` | Max single item size (2GB) |
 | `CONTENT_CACHE_PATH` | string | `` | Cache storage path (empty = in-memory only) |
+
+#### HTTP Connection Pool Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `HTTP_CONNECTIONS_PER_HOST` | integer | `10` | Max connections per gateway host |
+| `HTTP_CONNECT_TIMEOUT_MS` | integer | `30000` | TCP connection timeout |
+| `HTTP_REQUEST_TIMEOUT_MS` | integer | `30000` | Full request lifecycle timeout |
+| `HTTP_KEEPALIVE_TIMEOUT_MS` | integer | `60000` | Keep-alive connection timeout |
 
 #### Rate Limiting Configuration
 
@@ -1304,6 +1823,55 @@ Exports telemetry data in a format suitable for reward calculations.
 | `TELEMETRY_EXPORT_INTERVAL_HOURS` | integer | `24` | Export interval |
 | `TELEMETRY_EXPORT_PATH` | string | `./data/telemetry-export.json` | Export file path |
 
+#### Gateway Ping Service Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `PING_ENABLED` | boolean | `true` | Enable gateway ping service |
+| `PING_INTERVAL_HOURS` | integer | `4` | Interval between ping rounds |
+| `PING_GATEWAY_COUNT` | integer | `50` | Number of gateways to ping per round |
+| `PING_TIMEOUT_MS` | integer | `5000` | Timeout per gateway ping |
+| `PING_CONCURRENCY` | integer | `10` | Concurrent ping requests |
+
+#### Arweave HTTP API Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ARWEAVE_API_ENABLED` | boolean | `false` | Enable Arweave HTTP API proxy |
+| `ARWEAVE_READ_NODES` | string | `http://tip-1.arweave.xyz:1984,...` | Comma-separated read node URLs |
+| `ARWEAVE_WRITE_NODES` | string | `` | Comma-separated write node URLs (falls back to read nodes) |
+| `ARWEAVE_API_CACHE_ENABLED` | boolean | `true` | Enable Arweave API response caching |
+| `ARWEAVE_API_CACHE_IMMUTABLE_TTL_MS` | integer | `86400000` | Cache TTL for immutable data (24h) |
+| `ARWEAVE_API_CACHE_DYNAMIC_TTL_MS` | integer | `30000` | Cache TTL for dynamic data (30s) |
+| `ARWEAVE_API_CACHE_MAX_ENTRIES` | integer | `10000` | Max cache entries |
+| `ARWEAVE_API_CACHE_MAX_SIZE_BYTES` | integer | `104857600` | Max cache size (100MB) |
+| `ARWEAVE_API_RETRY_ATTEMPTS` | integer | `3` | Retry attempts for failed requests |
+| `ARWEAVE_API_RETRY_DELAY_MS` | integer | `100` | Delay between retries |
+| `ARWEAVE_API_TIMEOUT_MS` | integer | `30000` | Request timeout |
+
+#### Content Moderation Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `MODERATION_ENABLED` | boolean | `false` | Enable content moderation |
+| `MODERATION_BLOCKLIST_PATH` | string | `./data/blocklist.json` | Path to blocklist JSON file |
+| `MODERATION_ADMIN_TOKEN` | string | `` | Admin API authentication token (required if enabled) |
+
+#### Shutdown Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SHUTDOWN_DRAIN_TIMEOUT_MS` | integer | `15000` | Grace period to drain requests (15s) |
+| `SHUTDOWN_TIMEOUT_MS` | integer | `30000` | Total shutdown timeout (30s) |
+
+#### Error Handling Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `EXIT_ON_UNHANDLED_REJECTION` | boolean | `true` | Exit on unhandled promise rejection |
+| `EXIT_ON_UNCAUGHT_EXCEPTION` | boolean | `true` | Exit on uncaught exception |
+| `EXIT_GRACE_PERIOD_MS` | integer | `3000` | Grace period before forced exit |
+
 ### 10.2 Configuration Examples
 
 #### Development Configuration
@@ -1317,6 +1885,7 @@ ROUTING_STRATEGY=random
 LOG_LEVEL=debug
 TELEMETRY_ENABLED=true
 TELEMETRY_ROUTER_ID=dev-router
+ARWEAVE_API_ENABLED=true
 ```
 
 #### Production Configuration
@@ -1328,35 +1897,35 @@ BASE_DOMAIN=router.example.com
 DEFAULT_MODE=proxy
 ALLOW_MODE_OVERRIDE=true
 
+# Verification - use top-staked gateways
 VERIFICATION_ENABLED=true
-TRUSTED_GATEWAYS=https://turbo-gateway.com,https://ardrive.net,https://permagate.io
+VERIFICATION_GATEWAY_SOURCE=top-staked
+VERIFICATION_GATEWAY_COUNT=3
 ARNS_CONSENSUS_THRESHOLD=2
 
-ROUTING_STRATEGY=fastest
-GATEWAY_SOURCE=trusted-peers
-TRUSTED_PEER_GATEWAY=https://turbo-gateway.com
+# Routing - use network with temperature strategy
+ROUTING_STRATEGY=temperature
+ROUTING_GATEWAY_SOURCE=network
+PING_ENABLED=true
 
+# Resilience
 RETRY_ATTEMPTS=3
-RETRY_DELAY_MS=100
-GATEWAY_HEALTH_TTL_MS=300000
 CIRCUIT_BREAKER_THRESHOLD=3
-CIRCUIT_BREAKER_RESET_MS=60000
 
+# Caching
 ARNS_CACHE_TTL_MS=300000
 CONTENT_CACHE_ENABLED=true
+CONTENT_CACHE_PATH=/var/lib/wayfinder/cache
 
+# Rate limiting
 RATE_LIMIT_ENABLED=true
-RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=1000
 
+# Logging & Telemetry
 LOG_LEVEL=info
-
 TELEMETRY_ENABLED=true
 TELEMETRY_ROUTER_ID=prod-router-1
-TELEMETRY_SAMPLE_SUCCESS=0.1
-TELEMETRY_SAMPLE_ERRORS=1.0
 TELEMETRY_DB_PATH=/var/lib/wayfinder/telemetry.db
-TELEMETRY_RETENTION_DAYS=30
 ```
 
 #### High-Security Configuration
@@ -1365,19 +1934,91 @@ TELEMETRY_RETENTION_DAYS=30
 DEFAULT_MODE=proxy
 ALLOW_MODE_OVERRIDE=false
 
+# Strict verification with static trusted gateways
 VERIFICATION_ENABLED=true
-TRUSTED_GATEWAYS=https://gateway1.internal,https://gateway2.internal,https://gateway3.internal
+VERIFICATION_GATEWAY_SOURCE=static
+VERIFICATION_STATIC_GATEWAYS=https://gateway1.internal,https://gateway2.internal,https://gateway3.internal
 ARNS_CONSENSUS_THRESHOLD=3
 
+# Static routing through internal gateways only
 ROUTING_STRATEGY=round-robin
-GATEWAY_SOURCE=static
-STATIC_GATEWAYS=https://gateway1.internal,https://gateway2.internal
+ROUTING_GATEWAY_SOURCE=static
+ROUTING_STATIC_GATEWAYS=https://gateway1.internal,https://gateway2.internal
 
 CONTENT_CACHE_ENABLED=true
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_MAX_REQUESTS=100
 
 TELEMETRY_ENABLED=true
+```
+
+#### Single Application Hosting
+
+```env
+# Serve a single ArNS application at the root domain
+ROOT_HOST_CONTENT=myapp
+RESTRICT_TO_ROOT_HOST=true
+
+DEFAULT_MODE=proxy
+VERIFICATION_ENABLED=true
+
+# Optionally enable GraphQL for the app
+GRAPHQL_PROXY_URL=https://arweave.net/graphql
+```
+
+#### Full-Featured Configuration with Arweave API
+
+```env
+PORT=3000
+BASE_DOMAIN=arweave.company.com
+ROOT_HOST_CONTENT=company-app
+
+# Operating modes
+DEFAULT_MODE=proxy
+ALLOW_MODE_OVERRIDE=true
+
+# Verification
+VERIFICATION_ENABLED=true
+VERIFICATION_GATEWAY_SOURCE=top-staked
+VERIFICATION_GATEWAY_COUNT=5
+
+# Routing with temperature strategy
+ROUTING_STRATEGY=temperature
+ROUTING_GATEWAY_SOURCE=network
+TEMPERATURE_WINDOW_MS=300000
+PING_ENABLED=true
+PING_INTERVAL_HOURS=2
+
+# Arweave HTTP API
+ARWEAVE_API_ENABLED=true
+ARWEAVE_READ_NODES=http://tip-1.arweave.xyz:1984,http://tip-2.arweave.xyz:1984
+ARWEAVE_API_CACHE_ENABLED=true
+
+# GraphQL proxy
+GRAPHQL_PROXY_URL=https://arweave.net/graphql
+
+# Content moderation
+MODERATION_ENABLED=true
+MODERATION_BLOCKLIST_PATH=/var/lib/wayfinder/blocklist.json
+MODERATION_ADMIN_TOKEN=your-secure-admin-token
+
+# Caching
+CONTENT_CACHE_ENABLED=true
+CONTENT_CACHE_MAX_SIZE_BYTES=107374182400
+CONTENT_CACHE_PATH=/var/lib/wayfinder/cache
+
+# HTTP connection pool
+HTTP_CONNECTIONS_PER_HOST=20
+HTTP_KEEPALIVE_TIMEOUT_MS=120000
+
+# Rate limiting
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_MAX_REQUESTS=5000
+
+# Telemetry
+TELEMETRY_ENABLED=true
+TELEMETRY_ROUTER_ID=prod-full-1
+TELEMETRY_DB_PATH=/var/lib/wayfinder/telemetry.db
 ```
 
 ---
@@ -1466,18 +2107,83 @@ TELEMETRY_ENABLED=true
 - Encoding: Base64url (URL-safe)
 - Verification: Compare computed vs trusted hash
 
+#### 11.3.4 Content Moderation Security
+
+When content moderation is enabled:
+
+- **Admin Token Authentication**: All moderation API requests require `Authorization: Bearer {token}` header
+- **Token Requirements**: Admin token should be minimum 16 characters, randomly generated
+- **Audit Trail**: All block/unblock actions are logged with timestamp and actor
+- **Immediate Effect**: Blocked content is purged from all caches immediately
+- **File Permissions**: Blocklist file should have restricted permissions (600)
+- **Hot Reload Security**: File watcher only triggers on valid JSON content
+
+**Threats Specific to Moderation:**
+
+| Threat | Mitigation |
+|--------|------------|
+| Unauthorized blocklist modification | Admin token required for all mutations |
+| Token exposure in logs | Tokens are not logged |
+| Blocklist file tampering | File integrity monitored, atomic writes |
+| Blocking via brute force | Rate limiting on admin endpoints |
+
+#### 11.3.5 Arweave API Proxy Security
+
+When Arweave HTTP API proxy is enabled:
+
+- **No User-Controlled Hosts**: Only configured Arweave nodes are contacted
+- **Request Validation**: API paths are validated against known endpoint patterns
+- **No Write Operations Without Config**: Write nodes must be explicitly configured
+- **Response Sanitization**: Node responses are not modified, but unexpected formats are rejected
+- **Timeout Protection**: All node requests have configurable timeouts
+
+**Threats Specific to Arweave API:**
+
+| Threat | Mitigation |
+|--------|------------|
+| SSRF via malformed requests | Strict path validation, no host override |
+| Stale blockchain data | Configurable cache TTLs with short dynamic TTL |
+| Node exhaustion | Round-robin selection, retry on different nodes |
+| Large response attacks | Response size limits |
+
+#### 11.3.6 GraphQL Proxy Security
+
+When GraphQL proxy is enabled:
+
+- **Fixed Upstream**: Only the configured `GRAPHQL_PROXY_URL` is contacted
+- **No Query Modification**: Queries are passed through without modification
+- **Upstream Indicator**: Response headers indicate the upstream used
+- **Method Restriction**: Only GET and POST methods are proxied
+
 ### 11.4 Security Checklist
 
+**Core Security:**
 - [ ] All gateway communication uses HTTPS
 - [ ] Trusted gateways are independently operated
 - [ ] Consensus threshold ≥ 2 for ArNS resolution
-- [ ] Strict mode enabled for high-security deployments
 - [ ] Rate limiting enabled to prevent abuse
-- [ ] Logs do not contain sensitive data
-- [ ] Error messages are generic
 - [ ] Router deployed behind TLS-terminating load balancer
-- [ ] Regular security audits of dependencies
+
+**Logging & Monitoring:**
+- [ ] Logs do not contain sensitive data (tokens, PII)
+- [ ] Error messages are generic (no internal details)
 - [ ] Monitoring for anomalous traffic patterns
+- [ ] Regular security audits of dependencies
+
+**Content Moderation (if enabled):**
+- [ ] Admin token is randomly generated and ≥ 16 characters
+- [ ] Admin token is stored securely (not in source control)
+- [ ] Blocklist file has restricted permissions (600)
+- [ ] Moderation actions are audited
+
+**Arweave API Proxy (if enabled):**
+- [ ] Only trusted Arweave nodes are configured
+- [ ] Appropriate cache TTLs for dynamic vs immutable data
+- [ ] Request timeouts are configured
+
+**GraphQL Proxy (if enabled):**
+- [ ] GraphQL upstream is a trusted endpoint
+- [ ] Response size limits are appropriate
 
 ---
 
@@ -1852,56 +2558,99 @@ router.example.com.     A     <load-balancer-ip>
 
 ## 15. Future Roadmap
 
-### 15.1 Completed in Current Version
+### 15.1 Completed (Version 2.0)
 
-- **Rate Limiting** ✓
-  - IP-based rate limiting
-  - Configurable window and limits
-  - Rate limit headers (X-RateLimit-*)
+**Core Features (v1.0):**
+- ✅ Proxy and Route modes for content delivery
+- ✅ ArNS subdomain and txId path routing
+- ✅ Hash verification against trusted gateways
+- ✅ Consensus-based ArNS resolution
+- ✅ Gateway selection strategies (fastest, random, round-robin)
+- ✅ Circuit breaker pattern for gateway health
+- ✅ Manifest verification for path-based content
+- ✅ Gateway health tracking and automatic failover
 
-- **Content Caching** ✓
-  - LRU cache for verified content
-  - Configurable max size (up to 50GB default)
-  - Per-item size limits
+**Enhanced Features (v1.x):**
+- ✅ Rate limiting with configurable windows
+- ✅ Content caching with LRU eviction (up to 50GB)
+- ✅ Gateway telemetry with SQLite storage
+- ✅ Stats API endpoints (`/wayfinder/stats/*`)
+- ✅ Root host content serving (ArNS or txId)
+- ✅ Verification retry with gateway exclusion
 
-- **Gateway Telemetry** ✓
-  - SQLite-backed metrics storage
-  - Per-gateway performance tracking
-  - Stats API endpoints (/wayfinder/stats/*)
-  - Reward data export
+**New in Version 2.0:**
+- ✅ **Temperature Routing Strategy**
+  - Weighted selection based on recent latency and success rate
+  - Gateway temperature cache for performance tracking
+  - Slower gateways still receive traffic for recovery detection
 
-- **Manifest Verification** ✓
-  - Fetches and verifies Arweave path manifests
-  - Verifies path mappings match expected content
-  - Three-layer verification: manifest hash, path mapping, content hash
-  - Caching of verified manifests
+- ✅ **Gateway Ping Service**
+  - Proactive gateway health checking
+  - Configurable ping intervals and concurrency
+  - Updates temperature cache for routing decisions
 
-- **ArNS Root Host** ✓
-  - Serve any ArNS name at the root domain via `ARNS_ROOT_HOST`
-  - Info page moves to `/wayfinder/info` when configured
-  - All router endpoints consolidated under `/wayfinder/` prefix
+- ✅ **Arweave HTTP API Proxy**
+  - Full Arweave node HTTP API support (`/info`, `/tx/*`, `/wallet/*`, `/block/*`)
+  - Separate read/write node pools with round-robin selection
+  - Category-aware caching (immutable vs dynamic data)
+  - Configurable retry logic and timeouts
 
-- **Security Improvements** ✓
-  - Never trust source gateway digest headers (always verify against trusted gateways)
-  - Minimum consensus threshold of 2 enforced for ArNS resolution
-  - Parallel manifest fetching with Promise.any() for reliability
+- ✅ **Content Moderation System**
+  - Block content by ArNS name or transaction ID
+  - Automatic ArNS-to-txId resolution at block time
+  - Admin API with token authentication
+  - Blocklist persistence with hot-reload
+  - Cache purging on block action
 
-### 15.2 Version 1.1
+- ✅ **GraphQL Proxy**
+  - Proxy `/graphql` requests to upstream endpoint
+  - Support for GET and POST methods
+  - Upstream indicator headers
+
+- ✅ **Root Host Restriction Mode**
+  - Serve only root domain content when `RESTRICT_TO_ROOT_HOST=true`
+  - Blocks subdomain and txId path requests
+  - Management endpoints remain accessible
+
+- ✅ **HTTP Connection Pooling**
+  - Configurable connections per host
+  - Keep-alive and timeout management
+  - Built on undici for performance
+
+- ✅ **Graceful Shutdown**
+  - Configurable drain period for in-flight requests
+  - SIGTERM/SIGINT handling
+  - 503 responses during shutdown
+
+- ✅ **Gateway Rewards System**
+  - Telemetry-based reward calculation
+  - Scoring formula with volume, reliability, speed, bandwidth
+  - Verification gateway bonus
+  - Operator/delegate reward splitting
+  - CLI commands for reward management
+
+### 15.2 Version 2.1 (Planned)
 
 - **Enhanced Metrics**
-  - Request latency histograms
-  - Bandwidth metrics by gateway
+  - Request latency histograms in Prometheus format
+  - Bandwidth metrics per gateway
   - Cache effectiveness metrics
 
-- **Cache Invalidation API**
+- **Cache Management API**
   - HTTP endpoint for ArNS cache invalidation
   - Selective content cache purge
+  - Cache statistics endpoint
 
-### 15.3 Version 2.0
+- **Improved Moderation**
+  - Wildcard blocking patterns
+  - Temporary blocks with TTL
+  - Block reason categories
+
+### 15.3 Version 3.0 (Future)
 
 - **WebSocket Support**
-  - Proxy WebSocket connections
-  - Gateway health via WebSocket
+  - Proxy WebSocket connections to gateways
+  - Real-time gateway health updates
 
 - **Edge Deployment**
   - Cloudflare Workers support
@@ -1909,18 +2658,23 @@ router.example.com.     A     <load-balancer-ip>
   - Vercel Edge support
 
 - **Advanced Routing**
-  - Geographic routing
-  - Weighted routing
-  - Custom routing rules
+  - Geographic routing based on client location
+  - Weighted routing with manual configuration
+  - Custom routing rules via configuration
+
+- **Multi-Region Support**
+  - Region-aware gateway selection
+  - Cross-region failover
+  - Distributed telemetry aggregation
 
 ### 15.4 Future Considerations
 
-- Multi-region deployment support
-- A/B testing for gateway selection
-- Machine learning for gateway prediction
-- Integration with ar.io incentive system
-- Support for encrypted content
-- GraphQL API for configuration
+- A/B testing for gateway selection algorithms
+- Machine learning for gateway performance prediction
+- Deep integration with ar.io incentive system
+- Support for encrypted content (requires client-side decryption)
+- Real-time configuration updates without restart
+- Plugin system for custom verification strategies
 
 ---
 
@@ -1930,20 +2684,28 @@ router.example.com.     A     <load-balancer-ip>
 |------|------------|
 | **ArNS** | Arweave Name System - human-readable names for Arweave content |
 | **ar.io** | Decentralized gateway network for Arweave |
+| **Arweave Node** | Full node in the Arweave network that stores and serves blockchain data |
 | **Base64url** | URL-safe Base64 encoding used by Arweave |
+| **Blocklist** | List of ArNS names or txIds blocked from being served |
 | **Circuit Breaker** | Pattern to prevent cascading failures by temporarily disabling failed services |
 | **Consensus** | Agreement among multiple parties (gateways) on a value |
 | **Gateway** | Server that provides HTTP access to Arweave data |
+| **GraphQL** | Query language for APIs, used by Arweave for transaction queries |
 | **Hash Verification** | Comparing computed SHA-256 hash with expected value |
+| **Hot Reload** | Automatically reloading configuration when files change |
+| **Immutable Data** | Data that never changes (transactions, blocks) - cacheable forever |
 | **LRU** | Least Recently Used - cache eviction strategy |
 | **Manifest** | JSON document describing multi-file Arweave content |
+| **Moderation** | System for blocking content based on policy or compliance |
 | **Proxy Mode** | Fetching and serving content through the router |
 | **Route Mode** | Redirecting requests to gateway URLs |
 | **Sandbox** | Isolated subdomain for transaction content |
+| **Temperature** | Routing strategy metric combining latency and success rate |
 | **Telemetry** | Collection of gateway performance metrics for monitoring |
 | **Transaction ID (TxId)** | 43-character identifier for Arweave transactions |
 | **TTL** | Time To Live - duration before cache expiration |
 | **Trusted Gateway** | Gateway trusted for verification hash retrieval |
+| **Winston** | Smallest unit of AR token (1 AR = 10^12 winston) |
 
 ---
 
@@ -1954,6 +2716,7 @@ router.example.com.     A     <load-balancer-ip>
 | 1.0 | Dec 2024 | AR.IO | Initial specification |
 | 1.1 | Dec 2024 | AR.IO | Added telemetry documentation, stats API endpoints, updated config reference, aligned metrics with implementation, updated roadmap |
 | 1.2 | Dec 2024 | AR.IO | Added manifest verification, ARNS_ROOT_HOST configuration, security improvements (never trust source gateway), moved all endpoints to /wayfinder/ prefix, updated deployment examples |
+| 2.0 | Jan 2026 | AR.IO | Major update: Added Arweave HTTP API proxy (Section 6.7, 9.5), Content Moderation system (Section 6.8, 9.7), GraphQL proxy (Section 6.9, 9.6), Temperature routing strategy, Gateway Ping Service, Root Host Restriction Mode, HTTP connection pooling, Graceful Shutdown Manager, Gateway Rewards System. Complete rewrite of Configuration Reference (Section 10.1) with 70+ environment variables. Updated Security Model with moderation and API proxy considerations. Comprehensive roadmap update. |
 
 ---
 

@@ -162,8 +162,8 @@ export function createArweaveApiRouteHandler(deps: ArweaveApiHandlerDeps) {
     });
 
     try {
-      // Select a node
-      const node = nodeSelector.select();
+      // Select a node for read operations (route mode redirects to GET endpoints)
+      const node = nodeSelector.select("read");
 
       // Build the API path
       const apiPath = constructArweaveApiPath(endpoint, params);

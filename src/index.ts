@@ -176,6 +176,12 @@ async function main() {
     await services.networkGatewayManager.initialize();
   }
 
+  // Initialize blocklist service for content moderation
+  if (services.blocklistService) {
+    logger.info("Initializing content moderation blocklist...");
+    await services.blocklistService.initialize();
+  }
+
   // Start server first - don't block on ping service
   // The temperature cache works fine without ping data (uses default scores)
   // and will improve as ping data populates in the background
@@ -224,6 +230,12 @@ async function main() {
       if (services.telemetryService) {
         logger.info("Stopping telemetry service");
         services.telemetryService.stop();
+      }
+
+      // Stop blocklist service (close file watcher)
+      if (services.blocklistService) {
+        logger.info("Stopping blocklist service");
+        await services.blocklistService.stop();
       }
 
       // Close HTTP connection pools

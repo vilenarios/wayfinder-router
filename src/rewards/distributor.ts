@@ -18,7 +18,9 @@ export interface TokenTransferService {
 }
 
 export interface DelegationSource {
-  getDelegationInfo(operatorAddress: string): Promise<DelegationInfo | undefined>;
+  getDelegationInfo(
+    operatorAddress: string,
+  ): Promise<DelegationInfo | undefined>;
 }
 
 export interface RewardStorage {
@@ -28,7 +30,7 @@ export interface RewardStorage {
   updatePeriodStatus(
     periodId: string,
     status: RewardPeriod["status"],
-    distribution?: RewardPeriod["distribution"]
+    distribution?: RewardPeriod["distribution"],
   ): Promise<void>;
 }
 
@@ -46,10 +48,10 @@ export function createRewardDistributor(deps: DistributorDeps) {
    * Respects the gateway's delegation settings
    */
   async function calculateDistribution(
-    score: GatewayScore
+    score: GatewayScore,
   ): Promise<RewardDistribution> {
     const delegationInfo = await delegationSource.getDelegationInfo(
-      score.operatorAddress
+      score.operatorAddress,
     );
 
     // If no delegation info or no delegates, all goes to operator
@@ -73,15 +75,22 @@ export function createRewardDistributor(deps: DistributorDeps) {
     const delegateRewards = delegationInfo.delegates.map((delegate) => ({
       address: delegate.address,
       reward:
-        Math.floor(totalDelegateReward * delegate.shareOfDelegatedStake * 1000) / 1000,
+        Math.floor(
+          totalDelegateReward * delegate.shareOfDelegatedStake * 1000,
+        ) / 1000,
       stake: delegate.stake,
     }));
 
     // Handle rounding - give remainder to operator
-    const distributedToDelegates = delegateRewards.reduce((sum, d) => sum + d.reward, 0);
+    const distributedToDelegates = delegateRewards.reduce(
+      (sum, d) => sum + d.reward,
+      0,
+    );
     const adjustedOperatorReward =
-      Math.floor((operatorReward + (totalDelegateReward - distributedToDelegates)) * 1000) /
-      1000;
+      Math.floor(
+        (operatorReward + (totalDelegateReward - distributedToDelegates)) *
+          1000,
+      ) / 1000;
 
     return {
       periodId: "",
@@ -96,7 +105,9 @@ export function createRewardDistributor(deps: DistributorDeps) {
   /**
    * Preview distribution for a period (without executing)
    */
-  async function previewDistribution(period: RewardPeriod): Promise<RewardDistribution[]> {
+  async function previewDistribution(
+    period: RewardPeriod,
+  ): Promise<RewardDistribution[]> {
     const distributions: RewardDistribution[] = [];
 
     for (const score of period.gatewayScores.filter((s) => s.qualified)) {
@@ -113,11 +124,16 @@ export function createRewardDistributor(deps: DistributorDeps) {
    */
   async function executeDistribution(
     periodId: string,
-    dryRun: boolean = false
+    dryRun: boolean = false,
   ): Promise<{
     success: boolean;
     distributions: RewardDistribution[];
-    transactions: Array<{ address: string; amount: number; txId?: string; error?: string }>;
+    transactions: Array<{
+      address: string;
+      amount: number;
+      txId?: string;
+      error?: string;
+    }>;
     totalDistributed: number;
   }> {
     const period = await storage.loadPeriod(periodId);
@@ -127,7 +143,7 @@ export function createRewardDistributor(deps: DistributorDeps) {
 
     if (period.status !== "approved" && !dryRun) {
       throw new Error(
-        `Period ${periodId} is not approved for distribution (status: ${period.status})`
+        `Period ${periodId} is not approved for distribution (status: ${period.status})`,
       );
     }
 
@@ -135,14 +151,17 @@ export function createRewardDistributor(deps: DistributorDeps) {
     const distributions = await previewDistribution(period);
 
     // Calculate total needed
-    const totalNeeded = distributions.reduce((sum, d) => sum + d.totalReward, 0);
+    const totalNeeded = distributions.reduce(
+      (sum, d) => sum + d.totalReward,
+      0,
+    );
 
     // Check balance if not dry run
     if (!dryRun) {
       const balance = await tokenService.getBalance();
       if (balance < totalNeeded) {
         throw new Error(
-          `Insufficient balance: need ${totalNeeded} ARIO, have ${balance} ARIO`
+          `Insufficient balance: need ${totalNeeded} ARIO, have ${balance} ARIO`,
         );
       }
     }
@@ -170,7 +189,7 @@ export function createRewardDistributor(deps: DistributorDeps) {
           try {
             const result = await tokenService.transfer(
               distribution.operatorAddress,
-              distribution.operatorReward
+              distribution.operatorReward,
             );
             transactions.push({
               address: distribution.operatorAddress,
@@ -200,7 +219,10 @@ export function createRewardDistributor(deps: DistributorDeps) {
             totalDistributed += delegate.reward;
           } else {
             try {
-              const result = await tokenService.transfer(delegate.address, delegate.reward);
+              const result = await tokenService.transfer(
+                delegate.address,
+                delegate.reward,
+              );
               transactions.push({
                 address: delegate.address,
                 amount: delegate.reward,
@@ -225,15 +247,23 @@ export function createRewardDistributor(deps: DistributorDeps) {
         distributedAt: new Date().toISOString(),
         transactionIds: distributions.map((d) => ({
           gateway: d.gateway,
-          operatorTxId: transactions.find((t) => t.address === d.operatorAddress)?.txId,
+          operatorTxId: transactions.find(
+            (t) => t.address === d.operatorAddress,
+          )?.txId,
           delegateTxIds: d.delegateRewards
-            .map((dr) => transactions.find((t) => t.address === dr.address)?.txId)
+            .map(
+              (dr) => transactions.find((t) => t.address === dr.address)?.txId,
+            )
             .filter((txId): txId is string => !!txId),
         })),
         totalDistributed,
       };
 
-      await storage.updatePeriodStatus(periodId, "distributed", distributionRecord);
+      await storage.updatePeriodStatus(
+        periodId,
+        "distributed",
+        distributionRecord,
+      );
     }
 
     return {
@@ -254,7 +284,9 @@ export function createRewardDistributor(deps: DistributorDeps) {
     }
 
     if (period.status !== "pending_review" && period.status !== "calculated") {
-      throw new Error(`Period ${periodId} cannot be approved (status: ${period.status})`);
+      throw new Error(
+        `Period ${periodId} cannot be approved (status: ${period.status})`,
+      );
     }
 
     await storage.updatePeriodStatus(periodId, "approved");
@@ -263,7 +295,10 @@ export function createRewardDistributor(deps: DistributorDeps) {
   /**
    * Reject a period (won't be distributed)
    */
-  async function rejectPeriod(periodId: string, _reason: string): Promise<void> {
+  async function rejectPeriod(
+    periodId: string,
+    _reason: string,
+  ): Promise<void> {
     // Note: reason is logged but not stored in current implementation
     // Future: could store rejection reason in period metadata
     const period = await storage.loadPeriod(periodId);
@@ -277,9 +312,9 @@ export function createRewardDistributor(deps: DistributorDeps) {
   /**
    * Get periods ready for distribution (past delay period)
    */
-  async function getPendingDistributions(
-    config: { distributionDelayDays: number }
-  ): Promise<RewardPeriod[]> {
+  async function getPendingDistributions(config: {
+    distributionDelayDays: number;
+  }): Promise<RewardPeriod[]> {
     const allPeriods = await storage.listPeriods("approved");
     const now = new Date();
 
@@ -293,7 +328,9 @@ export function createRewardDistributor(deps: DistributorDeps) {
   /**
    * Format distribution preview for review
    */
-  function formatDistributionPreview(distributions: RewardDistribution[]): string {
+  function formatDistributionPreview(
+    distributions: RewardDistribution[],
+  ): string {
     const lines: string[] = [];
 
     lines.push("=".repeat(80));
@@ -307,13 +344,17 @@ export function createRewardDistributor(deps: DistributorDeps) {
     for (const dist of distributions) {
       lines.push(`Gateway: ${dist.gateway}`);
       lines.push(`  Total Reward: ${dist.totalReward.toFixed(3)} ARIO`);
-      lines.push(`  Operator (${dist.operatorAddress}): ${dist.operatorReward.toFixed(3)} ARIO`);
+      lines.push(
+        `  Operator (${dist.operatorAddress}): ${dist.operatorReward.toFixed(3)} ARIO`,
+      );
       totalToOperators += dist.operatorReward;
 
       if (dist.delegateRewards.length > 0) {
         lines.push(`  Delegates:`);
         for (const delegate of dist.delegateRewards) {
-          lines.push(`    ${delegate.address}: ${delegate.reward.toFixed(3)} ARIO (stake: ${delegate.stake})`);
+          lines.push(
+            `    ${delegate.address}: ${delegate.reward.toFixed(3)} ARIO (stake: ${delegate.stake})`,
+          );
           totalToDelegates += delegate.reward;
         }
       }
@@ -323,7 +364,9 @@ export function createRewardDistributor(deps: DistributorDeps) {
     lines.push("-".repeat(80));
     lines.push(`Total to Operators: ${totalToOperators.toFixed(3)} ARIO`);
     lines.push(`Total to Delegates: ${totalToDelegates.toFixed(3)} ARIO`);
-    lines.push(`Grand Total: ${(totalToOperators + totalToDelegates).toFixed(3)} ARIO`);
+    lines.push(
+      `Grand Total: ${(totalToOperators + totalToDelegates).toFixed(3)} ARIO`,
+    );
     lines.push("=".repeat(80));
 
     return lines.join("\n");

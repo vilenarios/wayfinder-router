@@ -31,8 +31,12 @@ export interface ReservedRequestInfo {
 
 export interface BlockedRequestInfo {
   type: "blocked";
-  reason: "subdomain_restricted" | "txid_path_restricted";
+  reason: "subdomain_restricted" | "txid_path_restricted" | "content_moderated";
   path: string;
+  /** For content_moderated: the blocked ArNS name */
+  blockedArnsName?: string;
+  /** For content_moderated: the blocked txId */
+  blockedTxId?: string;
 }
 
 // Re-export Arweave API types
@@ -69,7 +73,12 @@ export type RoutingStrategy =
   | "temperature";
 
 // Gateway sources for ROUTING (where to fetch data - trust not required)
-export type RoutingGatewaySource = "network" | "trusted-peers" | "static";
+// "trusted-ario" uses TRUSTED_ARIO_GATEWAYS directly, bypassing routing strategies
+export type RoutingGatewaySource =
+  | "network"
+  | "trusted-peers"
+  | "static"
+  | "trusted-ario";
 
 // Gateway sources for VERIFICATION (who to ask for hashes - trust required)
 export type VerificationGatewaySource = "top-staked" | "static";
@@ -129,6 +138,9 @@ export interface RouterConfig {
     trustedPeerGateway: URL;
     // Static gateways (when source is 'static')
     staticGateways: URL[];
+    // Trusted ar.io gateways (when source is 'trusted-ario')
+    // These bypass routing strategies and are used directly for content fetching
+    trustedArioGateways: URL[];
     // Retry settings
     retryAttempts: number;
     retryDelayMs: number;
@@ -238,8 +250,11 @@ export interface RouterConfig {
   arweaveApi: {
     /** Enable Arweave API proxy/routing */
     enabled: boolean;
-    /** Arweave node URLs to proxy requests to */
-    nodes: URL[];
+    /** Arweave node URLs for GET requests (chain state, tx info, blocks) */
+    readNodes: URL[];
+    /** Arweave node URLs for POST requests (tx submission, chunks)
+     * Falls back to readNodes if not specified */
+    writeNodes: URL[];
     /** Cache settings */
     cache: {
       enabled: boolean;
@@ -258,6 +273,16 @@ export interface RouterConfig {
     retryDelayMs: number;
     /** Request timeout in ms */
     timeoutMs: number;
+  };
+
+  // Content moderation settings
+  moderation: {
+    /** Enable content moderation */
+    enabled: boolean;
+    /** Path to blocklist JSON file */
+    blocklistPath: string;
+    /** Admin API token for authentication */
+    adminToken: string;
   };
 }
 

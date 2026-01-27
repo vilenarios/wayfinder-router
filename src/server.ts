@@ -80,6 +80,19 @@ import {
   createArweaveApiFetcher,
   ArweaveApiFetcher,
 } from "./services/arweave-api-fetcher.js";
+import {
+  BlocklistService,
+  createBlocklistService,
+} from "./moderation/blocklist-service.js";
+import {
+  createModerationAuthMiddleware,
+  createListBlocklistHandler,
+  createBlockHandler,
+  createUnblockHandler,
+  createStatsHandler as createModerationStatsHandler,
+  createReloadHandler,
+  createCheckHandler,
+} from "./moderation/handlers.js";
 
 // Extend Hono context with our custom variables
 declare module "hono" {
@@ -110,6 +123,8 @@ export interface RouterServices {
   arweaveNodeSelector: ArweaveNodeSelector | null;
   /** Arweave API fetcher (null if disabled) */
   arweaveApiFetcher: ArweaveApiFetcher | null;
+  /** Blocklist service for content moderation (null if disabled) */
+  blocklistService: BlocklistService | null;
 }
 
 export interface CreateServerOptions {
@@ -287,10 +302,40 @@ export function createServer(options: CreateServerOptions) {
         (url, options) => httpClient.fetch(url, options),
       );
       logger.info("Arweave API proxy enabled", {
-        nodes: config.arweaveApi.nodes.map((n) => n.hostname),
+        readNodes: config.arweaveApi.readNodes.map((n) => n.hostname),
+        writeNodes: config.arweaveApi.writeNodes.map((n) => n.hostname),
         cacheEnabled: config.arweaveApi.cache.enabled,
       });
     }
+  }
+
+  // Initialize content moderation blocklist service
+  const blocklistService = createBlocklistService({
+    config: config.moderation,
+    logger,
+    arnsResolver: {
+      resolve: async (arnsName: string) => {
+        const resolution = await arnsResolver.resolve(arnsName);
+        return resolution !== null ? { txId: resolution.txId } : null;
+      },
+    },
+    cachePurger: {
+      purgeArns: (arnsName: string) => {
+        arnsResolver.invalidate(arnsName);
+      },
+      purgeTxId: (txId: string) => {
+        contentCache.invalidate(txId);
+      },
+      purgeManifest: (txId: string) => {
+        manifestResolver.invalidate(txId);
+      },
+    },
+  });
+
+  if (blocklistService) {
+    logger.info("Content moderation enabled", {
+      blocklistPath: config.moderation.blocklistPath,
+    });
   }
 
   const services: RouterServices = {
@@ -309,6 +354,7 @@ export function createServer(options: CreateServerOptions) {
     arweaveApiCache,
     arweaveNodeSelector,
     arweaveApiFetcher,
+    blocklistService,
   };
 
   // Create Hono app
@@ -398,6 +444,51 @@ export function createServer(options: CreateServerOptions) {
   );
   app.get("/wayfinder/stats/export", createRewardExportHandler(statsDeps));
 
+  // Content moderation API endpoints (protected by auth middleware)
+  if (blocklistService && config.moderation.enabled) {
+    const moderationDeps = {
+      blocklistService,
+      config: config.moderation,
+      logger,
+    };
+    const authMiddleware = createModerationAuthMiddleware(config.moderation);
+
+    // Public check endpoint (no auth required)
+    app.get(
+      "/wayfinder/moderation/check/:type/:value",
+      createCheckHandler(moderationDeps),
+    );
+
+    // Protected admin endpoints
+    app.get(
+      "/wayfinder/moderation/blocklist",
+      authMiddleware,
+      createListBlocklistHandler(moderationDeps),
+    );
+    app.post(
+      "/wayfinder/moderation/block",
+      authMiddleware,
+      createBlockHandler(moderationDeps),
+    );
+    app.delete(
+      "/wayfinder/moderation/block/:type/:value",
+      authMiddleware,
+      createUnblockHandler(moderationDeps),
+    );
+    app.get(
+      "/wayfinder/moderation/stats",
+      authMiddleware,
+      createModerationStatsHandler(moderationDeps),
+    );
+    app.post(
+      "/wayfinder/moderation/reload",
+      authMiddleware,
+      createReloadHandler(moderationDeps),
+    );
+
+    logger.info("Content moderation API endpoints registered");
+  }
+
   // GraphQL proxy handler
   app.all("/graphql", async (c) => {
     if (!config.server.graphqlProxyUrl) {
@@ -437,8 +528,27 @@ export function createServer(options: CreateServerOptions) {
     const requestInfo = c.get("requestInfo");
     const routerMode = c.get("routerMode");
 
-    // Handle blocked requests (when RESTRICT_TO_ROOT_HOST is enabled)
+    // Handle blocked requests
     if (requestInfo.type === "blocked") {
+      // Content moderation blocking (403 Forbidden)
+      if (requestInfo.reason === "content_moderated") {
+        logger.info("Request blocked by content moderation", {
+          reason: requestInfo.reason,
+          path: requestInfo.path,
+          blockedArnsName: requestInfo.blockedArnsName,
+          blockedTxId: requestInfo.blockedTxId,
+        });
+        return c.json(
+          {
+            error: "Forbidden",
+            message: "This content is not available",
+            code: "CONTENT_BLOCKED",
+          },
+          403,
+        );
+      }
+
+      // Restriction mode blocking (404 Not Found)
       logger.debug("Request blocked by restriction mode", {
         reason: requestInfo.reason,
         path: requestInfo.path,
@@ -525,7 +635,8 @@ export function createServer(options: CreateServerOptions) {
         return c.json(
           {
             error: "Arweave API proxy not configured",
-            message: "Set ARWEAVE_API_ENABLED=true and configure ARWEAVE_NODES",
+            message:
+              "Set ARWEAVE_API_ENABLED=true and configure ARWEAVE_READ_NODES",
           },
           404,
         );
@@ -553,6 +664,41 @@ export function createServer(options: CreateServerOptions) {
           error instanceof Error ? error : new Error(String(error)),
           logger,
         );
+      }
+    }
+
+    // Check content moderation blocklist for ArNS and txId requests
+    if (blocklistService && config.moderation.enabled) {
+      if (requestInfo.type === "arns") {
+        if (blocklistService.isArnsBlocked(requestInfo.arnsName)) {
+          logger.info("Request blocked by content moderation (ArNS)", {
+            arnsName: requestInfo.arnsName,
+            path: requestInfo.path,
+          });
+          return c.json(
+            {
+              error: "Forbidden",
+              message: "This content is not available",
+              code: "CONTENT_BLOCKED",
+            },
+            403,
+          );
+        }
+      } else if (requestInfo.type === "txid") {
+        if (blocklistService.isTxIdBlocked(requestInfo.txId)) {
+          logger.info("Request blocked by content moderation (txId)", {
+            txId: requestInfo.txId,
+            path: requestInfo.path,
+          });
+          return c.json(
+            {
+              error: "Forbidden",
+              message: "This content is not available",
+              code: "CONTENT_BLOCKED",
+            },
+            403,
+          );
+        }
       }
     }
 

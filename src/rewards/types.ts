@@ -104,7 +104,12 @@ export interface RewardPeriod {
   gatewayScores: GatewayScore[];
 
   // Distribution status
-  status: "calculated" | "pending_review" | "approved" | "distributed" | "rejected";
+  status:
+    | "calculated"
+    | "pending_review"
+    | "approved"
+    | "distributed"
+    | "rejected";
 
   // Distribution details (filled after distribution)
   distribution?: {

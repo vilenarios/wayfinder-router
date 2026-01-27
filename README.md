@@ -17,6 +17,7 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 - **Caching** - In-memory LRU cache for verified content, manifests, and ArNS resolutions
 - **Circuit Breaker** - Automatically removes unhealthy gateways from rotation
 - **Telemetry** - SQLite-backed metrics for gateway performance tracking
+- **Gateway Rewards** - Off-chain incentive system to reward gateways for serving traffic
 
 ## Requirements
 
@@ -128,6 +129,56 @@ Router management endpoints are under the `/wayfinder/` prefix:
 | `/graphql` | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
 
 When `ROOT_HOST_CONTENT` is not set, the root endpoint (`/`) displays router info.
+
+## Gateway Rewards
+
+The rewards system distributes ARIO tokens to gateways based on their performance serving traffic through Wayfinder Router.
+
+### Reward Calculation
+
+Gateways are scored on four weighted factors:
+- **Volume (40%)** - Number of requests served
+- **Reliability (25%)** - Success rate
+- **Speed (20%)** - P95 latency
+- **Bandwidth (15%)** - Bytes served
+
+Verification gateways receive a 15% bonus. Rewards are split between operators and delegates according to gateway delegation settings.
+
+### CLI Commands
+
+```bash
+# Calculate yesterday's rewards
+npm run rewards:calculate
+
+# Calculate for a specific date
+npm run rewards calculate --date 2026-01-25
+
+# List all reward periods
+npm run rewards:list
+
+# Preview distribution (see operator/delegate splits)
+npm run rewards preview <periodId>
+
+# Run fraud detection
+npm run rewards fraud-check <periodId>
+
+# Approve for distribution (after review)
+npm run rewards approve <periodId>
+
+# Execute distribution (dry-run first!)
+npm run rewards distribute <periodId> --dry-run
+npm run rewards distribute <periodId>
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REWARDS_DATA_DIR` | `./data/rewards` | Directory for reward period data |
+| `TELEMETRY_DB_PATH` | `./data/telemetry.db` | Path to telemetry database |
+| `INSTANCE_ID` | `wayfinder-main` | Identifier for this instance |
+
+See [CLAUDE.md](CLAUDE.md) for detailed documentation.
 
 ## Docker
 

@@ -268,6 +268,13 @@ export class ManifestResolver {
   }
 
   /**
+   * Invalidate a cached manifest
+   */
+  invalidate(manifestTxId: string): void {
+    this.cache.delete(manifestTxId);
+  }
+
+  /**
    * Fetch raw manifest from trusted gateways and verify
    *
    * NOTE: We use custom verification instead of the SDK's HashVerificationStrategy

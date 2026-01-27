@@ -22,7 +22,7 @@ export interface TelemetrySource {
 export interface GatewayRegistry {
   getOperatorAddress(gatewayFqdn: string): Promise<string | undefined>;
   getGatewayInfo(
-    fqdn: string
+    fqdn: string,
   ): Promise<{ operatorAddress: string; fqdn: string } | undefined>;
 }
 
@@ -43,7 +43,7 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
   async function calculateRewards(
     startTime: Date,
     endTime: Date,
-    config: RewardConfig = DEFAULT_REWARD_CONFIG
+    config: RewardConfig = DEFAULT_REWARD_CONFIG,
   ): Promise<RewardPeriod> {
     const periodId = generatePeriodId(startTime, endTime);
 
@@ -52,7 +52,10 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
     const verificationGateways = await telemetry.getVerificationGateways();
 
     // Enrich with operator addresses
-    const enrichedStats = await enrichWithOperatorInfo(rawStats, verificationGateways);
+    const enrichedStats = await enrichWithOperatorInfo(
+      rawStats,
+      verificationGateways,
+    );
 
     // Calculate scores
     const scores = calculateScores(enrichedStats, config);
@@ -78,7 +81,7 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
    * Calculate rewards for yesterday (most common use case)
    */
   async function calculateYesterdayRewards(
-    config: RewardConfig = DEFAULT_REWARD_CONFIG
+    config: RewardConfig = DEFAULT_REWARD_CONFIG,
   ): Promise<RewardPeriod> {
     const now = new Date();
     const endTime = new Date(now);
@@ -95,7 +98,7 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
    */
   async function enrichWithOperatorInfo(
     stats: GatewayStats[],
-    verificationGateways: string[]
+    verificationGateways: string[],
   ): Promise<GatewayStats[]> {
     const enriched: GatewayStats[] = [];
 
@@ -106,7 +109,7 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
         ...stat,
         operatorAddress: gatewayInfo?.operatorAddress ?? "unknown",
         isVerificationGateway: verificationGateways.some(
-          (vg) => vg.includes(stat.fqdn) || stat.gateway.includes(vg)
+          (vg) => vg.includes(stat.fqdn) || stat.gateway.includes(vg),
         ),
       });
     }
@@ -119,7 +122,7 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
    */
   function calculateScores(
     stats: GatewayStats[],
-    config: RewardConfig
+    config: RewardConfig,
   ): GatewayScore[] {
     // First pass: calculate raw scores and find max values for normalization
     const maxValues = {
@@ -130,7 +133,9 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
     };
 
     // Calculate scores for each gateway
-    const rawScores = stats.map((stat) => calculateGatewayScore(stat, config, maxValues));
+    const rawScores = stats.map((stat) =>
+      calculateGatewayScore(stat, config, maxValues),
+    );
 
     // Calculate total score for pool share calculation
     const totalQualifiedScore = rawScores
@@ -148,7 +153,8 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
       }
 
       const poolShare = score.totalScore / totalQualifiedScore;
-      const rewardAmount = Math.floor(poolShare * config.dailyPoolAmount * 1000) / 1000; // 3 decimal precision
+      const rewardAmount =
+        Math.floor(poolShare * config.dailyPoolAmount * 1000) / 1000; // 3 decimal precision
 
       return {
         ...score,
@@ -164,7 +170,7 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
   function calculateGatewayScore(
     stat: GatewayStats,
     config: RewardConfig,
-    maxValues: { requests: number; bytes: number; minLatency: number }
+    maxValues: { requests: number; bytes: number; minLatency: number },
   ): GatewayScore {
     const successRate =
       stat.totalRequests > 0 ? stat.successfulRequests / stat.totalRequests : 0;
@@ -224,13 +230,21 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
    */
   function calculateNetworkStats(
     stats: GatewayStats[],
-    scores: GatewayScore[]
+    scores: GatewayScore[],
   ): RewardPeriod["networkStats"] {
     const totalRequests = stats.reduce((sum, s) => sum + s.totalRequests, 0);
-    const totalBytesServed = stats.reduce((sum, s) => sum + s.totalBytesServed, 0);
-    const totalSuccessful = stats.reduce((sum, s) => sum + s.successfulRequests, 0);
+    const totalBytesServed = stats.reduce(
+      (sum, s) => sum + s.totalBytesServed,
+      0,
+    );
+    const totalSuccessful = stats.reduce(
+      (sum, s) => sum + s.successfulRequests,
+      0,
+    );
 
-    const latencies = stats.filter((s) => s.avgLatencyMs > 0).map((s) => s.avgLatencyMs);
+    const latencies = stats
+      .filter((s) => s.avgLatencyMs > 0)
+      .map((s) => s.avgLatencyMs);
     const averageLatencyMs =
       latencies.length > 0
         ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length
@@ -242,7 +256,8 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
       totalGateways: stats.length,
       qualifiedGateways: scores.filter((s) => s.qualified).length,
       averageLatencyMs: Math.round(averageLatencyMs),
-      averageSuccessRate: totalRequests > 0 ? totalSuccessful / totalRequests : 0,
+      averageSuccessRate:
+        totalRequests > 0 ? totalSuccessful / totalRequests : 0,
     };
   }
 
@@ -251,7 +266,7 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
    */
   function detectFraudPatterns(
     currentPeriod: RewardPeriod,
-    historicalPeriods: RewardPeriod[]
+    historicalPeriods: RewardPeriod[],
   ): FraudFlag[] {
     const flags: FraudFlag[] = [];
 
@@ -334,7 +349,10 @@ export function createRewardCalculator(deps: RewardCalculatorDeps) {
       },
       pool: {
         totalAmount: period.config.dailyPoolAmount,
-        distributed: period.gatewayScores.reduce((sum, s) => sum + s.rewardAmount, 0),
+        distributed: period.gatewayScores.reduce(
+          (sum, s) => sum + s.rewardAmount,
+          0,
+        ),
         qualifiedGateways: period.networkStats.qualifiedGateways,
       },
       configuration: {

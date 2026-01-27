@@ -95,6 +95,18 @@ function createRoutingGatewaysProvider(
       };
     }
 
+    case "trusted-ario": {
+      // Trusted ar.io gateways - bypasses network/peer discovery
+      // Uses the configured TRUSTED_ARIO_GATEWAYS directly
+      logger.info("Using trusted ar.io gateways for routing", {
+        gatewayCount: config.routing.trustedArioGateways.length,
+        gateways: config.routing.trustedArioGateways.map((g) => g.hostname),
+      });
+      return {
+        getGateways: async () => config.routing.trustedArioGateways,
+      };
+    }
+
     default:
       throw new Error(
         `Unknown routing gateway source: ${config.routing.gatewaySource}`,

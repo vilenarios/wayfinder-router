@@ -89,6 +89,19 @@ export function loadConfig(): RouterConfig {
     "https://turbo-gateway.com,https://ardrive.net,https://permagate.io",
   );
 
+  // Trusted ar.io gateways (used when ROUTING_GATEWAY_SOURCE=trusted-ario)
+  // When set, bypasses routing strategies and uses these gateways directly
+  const trustedArioGatewaysStr = getEnv("TRUSTED_ARIO_GATEWAYS", "");
+
+  // Arweave nodes for GET requests (chain state queries)
+  const arweaveReadNodesStr = getEnv(
+    "ARWEAVE_READ_NODES",
+    "http://tip-1.arweave.xyz:1984,http://tip-2.arweave.xyz:1984,http://tip-3.arweave.xyz:1984,http://tip-4.arweave.xyz:1984,http://tip-5.arweave.xyz:1984",
+  );
+
+  // Arweave nodes for POST requests (tx submission) - falls back to read nodes if empty
+  const arweaveWriteNodesStr = getEnv("ARWEAVE_WRITE_NODES", "");
+
   return {
     server: {
       port: getEnvInt("PORT", 3000),
@@ -145,6 +158,8 @@ export function loadConfig(): RouterConfig {
       trustedPeerGateway: new URL(trustedPeerGatewayStr),
       // Static gateways (when source is 'static')
       staticGateways: parseUrls(routingStaticGatewaysStr),
+      // Trusted ar.io gateways (when source is 'trusted-ario')
+      trustedArioGateways: parseUrls(trustedArioGatewaysStr),
       // Retry settings
       retryAttempts: getEnvInt("RETRY_ATTEMPTS", 3),
       retryDelayMs: getEnvInt("RETRY_DELAY_MS", 100),
@@ -251,12 +266,14 @@ export function loadConfig(): RouterConfig {
     // Arweave HTTP API proxy settings
     arweaveApi: {
       enabled: getEnvBool("ARWEAVE_API_ENABLED", false),
-      nodes: parseUrls(
-        getEnv(
-          "ARWEAVE_NODES",
-          "http://tip-1.arweave.xyz:1984,http://tip-2.arweave.xyz:1984,http://tip-3.arweave.xyz:1984,http://tip-4.arweave.xyz:1984,http://tip-5.arweave.xyz:1984",
-        ),
-      ),
+      // Read nodes for GET requests (chain state, tx info, blocks)
+      readNodes: parseUrls(arweaveReadNodesStr),
+      // Write nodes for POST requests (tx submission, chunks)
+      // Falls back to readNodes if not specified
+      writeNodes:
+        arweaveWriteNodesStr.trim().length > 0
+          ? parseUrls(arweaveWriteNodesStr)
+          : parseUrls(arweaveReadNodesStr),
       cache: {
         enabled: getEnvBool("ARWEAVE_API_CACHE_ENABLED", true),
         // 24 hours for immutable data (transactions, blocks)
@@ -275,6 +292,16 @@ export function loadConfig(): RouterConfig {
       retryAttempts: getEnvInt("ARWEAVE_API_RETRY_ATTEMPTS", 3),
       retryDelayMs: getEnvInt("ARWEAVE_API_RETRY_DELAY_MS", 100),
       timeoutMs: getEnvInt("ARWEAVE_API_TIMEOUT_MS", 30_000),
+    },
+
+    // Content moderation settings
+    moderation: {
+      enabled: getEnvBool("MODERATION_ENABLED", false),
+      blocklistPath: getEnv(
+        "MODERATION_BLOCKLIST_PATH",
+        "./data/blocklist.json",
+      ),
+      adminToken: getEnv("MODERATION_ADMIN_TOKEN", ""),
     },
   };
 }
@@ -373,6 +400,7 @@ export function validateConfig(config: RouterConfig): void {
     "network",
     "trusted-peers",
     "static",
+    "trusted-ario",
   ];
   if (!validRoutingSources.includes(config.routing.gatewaySource)) {
     throw new Error(
@@ -387,6 +415,16 @@ export function validateConfig(config: RouterConfig): void {
   ) {
     throw new Error(
       "ROUTING_GATEWAY_SOURCE is static but no ROUTING_STATIC_GATEWAYS configured",
+    );
+  }
+
+  // Validate trusted ar.io gateways required when routing source is 'trusted-ario'
+  if (
+    config.routing.gatewaySource === "trusted-ario" &&
+    config.routing.trustedArioGateways.length === 0
+  ) {
+    throw new Error(
+      "ROUTING_GATEWAY_SOURCE is trusted-ario but no TRUSTED_ARIO_GATEWAYS configured",
     );
   }
 
@@ -543,9 +581,9 @@ export function validateConfig(config: RouterConfig): void {
   // === ARWEAVE API VALIDATION ===
 
   if (config.arweaveApi.enabled) {
-    if (config.arweaveApi.nodes.length === 0) {
+    if (config.arweaveApi.readNodes.length === 0) {
       throw new Error(
-        "ARWEAVE_API_ENABLED is true but no ARWEAVE_NODES configured",
+        "ARWEAVE_API_ENABLED is true but no ARWEAVE_READ_NODES configured",
       );
     }
 
@@ -606,5 +644,23 @@ export function validateConfig(config: RouterConfig): void {
       `Warning: Both ROOT_HOST_CONTENT ("${rootHostNew}") and ARNS_ROOT_HOST ("${rootHostOld}") are set. ` +
         `Using ROOT_HOST_CONTENT value.`,
     );
+  }
+
+  // === MODERATION VALIDATION ===
+
+  if (config.moderation.enabled) {
+    if (!config.moderation.adminToken) {
+      throw new Error(
+        "MODERATION_ENABLED is true but MODERATION_ADMIN_TOKEN is not set. " +
+          "An admin token is required for the moderation API.",
+      );
+    }
+
+    if (config.moderation.adminToken.length < 16) {
+      console.warn(
+        "Warning: MODERATION_ADMIN_TOKEN is very short. " +
+          "Consider using a longer token for better security.",
+      );
+    }
   }
 }

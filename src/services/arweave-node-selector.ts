@@ -7,8 +7,10 @@ import { GatewayHealthCache } from "../cache/gateway-health.js";
 import type { RouterConfig, Logger } from "../types/index.js";
 
 export interface ArweaveNodeSelectorOptions {
-  /** List of Arweave node URLs */
-  nodes: URL[];
+  /** List of Arweave node URLs for GET requests */
+  readNodes: URL[];
+  /** List of Arweave node URLs for POST requests (falls back to readNodes if empty) */
+  writeNodes: URL[];
   /** Health TTL in ms */
   healthTtlMs?: number;
   /** Number of failures before opening circuit */
@@ -21,20 +23,27 @@ export interface ArweaveNodeSelectorOptions {
   logger: Logger;
 }
 
+export type ArweaveOperationType = "read" | "write";
+
 export interface ArweaveNodeStats {
-  totalNodes: number;
-  healthyNodes: number;
-  unhealthyNodes: number;
+  totalReadNodes: number;
+  healthyReadNodes: number;
+  unhealthyReadNodes: number;
+  totalWriteNodes: number;
+  healthyWriteNodes: number;
+  unhealthyWriteNodes: number;
 }
 
 export class ArweaveNodeSelector {
-  private nodes: URL[];
+  private readNodes: URL[];
+  private writeNodes: URL[];
   private healthCache: GatewayHealthCache;
   private logger: Logger;
 
   constructor(options: ArweaveNodeSelectorOptions) {
     const {
-      nodes,
+      readNodes,
+      writeNodes,
       healthTtlMs = 300_000,
       circuitBreakerThreshold = 3,
       circuitBreakerResetMs = 60_000,
@@ -42,7 +51,9 @@ export class ArweaveNodeSelector {
       logger,
     } = options;
 
-    this.nodes = nodes;
+    this.readNodes = readNodes;
+    // Fall back to read nodes if no write nodes specified
+    this.writeNodes = writeNodes.length > 0 ? writeNodes : readNodes;
     this.logger = logger;
 
     // Reuse GatewayHealthCache for circuit breaker logic
@@ -55,19 +66,24 @@ export class ArweaveNodeSelector {
     });
 
     this.logger.info("Arweave node selector initialized", {
-      nodeCount: nodes.length,
-      nodes: nodes.map((n) => n.hostname),
+      readNodeCount: this.readNodes.length,
+      readNodes: this.readNodes.map((n) => n.hostname),
+      writeNodeCount: this.writeNodes.length,
+      writeNodes: this.writeNodes.map((n) => n.hostname),
     });
   }
 
   /**
-   * Select a healthy Arweave node
+   * Select a healthy Arweave node for the specified operation type
    * Uses random selection with fallback to round-robin if all unhealthy
+   * @param operation - Type of operation: 'read' for GET requests, 'write' for POST requests
    * @param exclude - Nodes to exclude from selection (e.g., already tried)
    */
-  select(exclude?: URL[]): URL {
+  select(operation: ArweaveOperationType = "read", exclude?: URL[]): URL {
+    const nodes = operation === "write" ? this.writeNodes : this.readNodes;
+
     // Filter to healthy nodes
-    let candidates = this.healthCache.filterHealthy(this.nodes);
+    let candidates = this.healthCache.filterHealthy(nodes);
 
     // Apply exclusion list
     if (exclude && exclude.length > 0) {
@@ -77,8 +93,10 @@ export class ArweaveNodeSelector {
 
     // If no healthy candidates, try all nodes (excluding the exclude list)
     if (candidates.length === 0) {
-      this.logger.warn("No healthy Arweave nodes, trying all nodes");
-      candidates = this.nodes;
+      this.logger.warn(
+        `No healthy Arweave ${operation} nodes, trying all nodes`,
+      );
+      candidates = nodes;
 
       if (exclude && exclude.length > 0) {
         const excludeSet = new Set(exclude.map((n) => n.toString()));
@@ -88,9 +106,11 @@ export class ArweaveNodeSelector {
 
     // If still no candidates, fall back to all nodes
     if (candidates.length === 0) {
-      this.logger.warn("All Arweave nodes excluded, resetting health cache");
+      this.logger.warn(
+        `All Arweave ${operation} nodes excluded, resetting health cache`,
+      );
       this.healthCache.clear();
-      candidates = this.nodes;
+      candidates = nodes;
     }
 
     // Random selection
@@ -123,21 +143,26 @@ export class ArweaveNodeSelector {
   }
 
   /**
-   * Get all configured nodes
+   * Get all configured nodes for an operation type
    */
-  getNodes(): URL[] {
-    return [...this.nodes];
+  getNodes(operation: ArweaveOperationType = "read"): URL[] {
+    const nodes = operation === "write" ? this.writeNodes : this.readNodes;
+    return [...nodes];
   }
 
   /**
    * Get node health statistics
    */
   stats(): ArweaveNodeStats {
-    const healthy = this.healthCache.filterHealthy(this.nodes);
+    const healthyRead = this.healthCache.filterHealthy(this.readNodes);
+    const healthyWrite = this.healthCache.filterHealthy(this.writeNodes);
     return {
-      totalNodes: this.nodes.length,
-      healthyNodes: healthy.length,
-      unhealthyNodes: this.nodes.length - healthy.length,
+      totalReadNodes: this.readNodes.length,
+      healthyReadNodes: healthyRead.length,
+      unhealthyReadNodes: this.readNodes.length - healthyRead.length,
+      totalWriteNodes: this.writeNodes.length,
+      healthyWriteNodes: healthyWrite.length,
+      unhealthyWriteNodes: this.writeNodes.length - healthyWrite.length,
     };
   }
 
@@ -161,17 +186,23 @@ export function createArweaveNodeSelector(
     return null;
   }
 
-  if (config.arweaveApi.nodes.length === 0) {
-    logger.warn("Arweave API enabled but no nodes configured");
+  if (config.arweaveApi.readNodes.length === 0) {
+    logger.warn("Arweave API enabled but no read nodes configured");
     return null;
   }
 
   return new ArweaveNodeSelector({
-    nodes: config.arweaveApi.nodes,
+    readNodes: config.arweaveApi.readNodes,
+    writeNodes: config.arweaveApi.writeNodes,
     healthTtlMs: config.resilience.gatewayHealthTtlMs,
     circuitBreakerThreshold: config.resilience.circuitBreakerThreshold,
     circuitBreakerResetMs: config.resilience.circuitBreakerResetMs,
-    maxNodes: Math.min(config.arweaveApi.nodes.length * 2, 100),
+    maxNodes: Math.min(
+      (config.arweaveApi.readNodes.length +
+        config.arweaveApi.writeNodes.length) *
+        2,
+      100,
+    ),
     logger,
   });
 }

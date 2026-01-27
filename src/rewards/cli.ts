@@ -13,8 +13,16 @@
  *   fraud-check <periodId>                          Run fraud detection
  */
 
-import { createRewardCalculator, type TelemetrySource, type GatewayRegistry } from "./calculator.js";
-import { createRewardDistributor, type TokenTransferService, type DelegationSource } from "./distributor.js";
+import {
+  createRewardCalculator,
+  type TelemetrySource,
+  type GatewayRegistry,
+} from "./calculator.js";
+import {
+  createRewardDistributor,
+  type TokenTransferService,
+  type DelegationSource,
+} from "./distributor.js";
 import { createFileStorage } from "./storage.js";
 import { DEFAULT_REWARD_CONFIG, type GatewayStats } from "./types.js";
 import { readFile } from "fs/promises";
@@ -22,7 +30,8 @@ import { resolve } from "path";
 
 // Configuration
 const DATA_DIR = process.env.REWARDS_DATA_DIR || "./data/rewards";
-const TELEMETRY_DB_PATH = process.env.TELEMETRY_DB_PATH || "./data/telemetry.db";
+const TELEMETRY_DB_PATH =
+  process.env.TELEMETRY_DB_PATH || "./data/telemetry.db";
 const INSTANCE_ID = process.env.INSTANCE_ID || "wayfinder-main";
 
 async function main() {
@@ -170,7 +179,9 @@ async function runCalculate(args: string[]) {
   console.log(`Status: ${period.status}`);
   console.log(`Next steps:`);
   console.log(`  1. Review the calculations above`);
-  console.log(`  2. Run fraud check: npm run rewards fraud-check ${period.periodId}`);
+  console.log(
+    `  2. Run fraud check: npm run rewards fraud-check ${period.periodId}`,
+  );
   console.log(`  3. Approve: npm run rewards approve ${period.periodId}`);
   console.log(`  4. Distribute: npm run rewards distribute ${period.periodId}`);
 }
@@ -267,7 +278,9 @@ async function runDistribute(args: string[]) {
   const result = await distributor.executeDistribution(periodId, dryRun);
 
   console.log(`\nDistribution ${result.success ? "completed" : "had errors"}:`);
-  console.log(`  Total distributed: ${result.totalDistributed.toFixed(3)} ARIO`);
+  console.log(
+    `  Total distributed: ${result.totalDistributed.toFixed(3)} ARIO`,
+  );
   console.log(`  Transactions: ${result.transactions.length}`);
 
   if (!result.success) {
@@ -305,14 +318,14 @@ async function runList(args: string[]) {
 
   console.log("Reward Periods:\n");
   console.log(
-    "Period ID                    Status           Qualified   Pool       Distributed"
+    "Period ID                    Status           Qualified   Pool       Distributed",
   );
   console.log("-".repeat(90));
 
   for (const period of periods) {
     const distributed = period.distribution?.totalDistributed ?? 0;
     console.log(
-      `${period.periodId.padEnd(28)} ${period.status.padEnd(16)} ${String(period.networkStats.qualifiedGateways).padEnd(11)} ${period.config.dailyPoolAmount.toFixed(0).padEnd(10)} ${distributed.toFixed(3)}`
+      `${period.periodId.padEnd(28)} ${period.status.padEnd(16)} ${String(period.networkStats.qualifiedGateways).padEnd(11)} ${period.config.dailyPoolAmount.toFixed(0).padEnd(10)} ${distributed.toFixed(3)}`,
     );
   }
 }
@@ -340,7 +353,9 @@ async function runFraudCheck(args: string[]) {
 
   // Get historical periods for comparison
   const historicalPeriods = await storage.getLatestPeriods(7);
-  const relevantHistory = historicalPeriods.filter((p) => p.periodId !== periodId);
+  const relevantHistory = historicalPeriods.filter(
+    (p) => p.periodId !== periodId,
+  );
 
   const flags = calculator.detectFraudPatterns(period, relevantHistory);
 
@@ -356,7 +371,7 @@ async function runFraudCheck(args: string[]) {
       console.log("");
     }
     console.log(
-      `\nReview these flags before approving. If fraud is confirmed, reject the period or adjust rewards.`
+      `\nReview these flags before approving. If fraud is confirmed, reject the period or adjust rewards.`,
     );
   }
 }
@@ -375,7 +390,10 @@ async function createTelemetrySource(): Promise<TelemetrySource> {
   }
 
   return {
-    async getGatewayStats(startTime: Date, endTime: Date): Promise<GatewayStats[]> {
+    async getGatewayStats(
+      startTime: Date,
+      endTime: Date,
+    ): Promise<GatewayStats[]> {
       const startHour = startTime.toISOString().slice(0, 13) + ":00:00";
       const endHour = endTime.toISOString().slice(0, 13) + ":00:00";
 
@@ -395,7 +413,7 @@ async function createTelemetrySource(): Promise<TelemetrySource> {
         FROM gateway_hourly_stats
         WHERE hour_bucket >= ? AND hour_bucket < ?
         GROUP BY gateway
-      `
+      `,
         )
         .all(startHour, endHour);
 
@@ -409,7 +427,8 @@ async function createTelemetrySource(): Promise<TelemetrySource> {
         avgLatencyMs: row.avg_latency_ms || 0,
         p95LatencyMs: row.p95_latency_ms || 0,
         totalBytesServed: row.total_bytes_served || 0,
-        verificationRequests: (row.verification_successes || 0) + (row.verification_failures || 0),
+        verificationRequests:
+          (row.verification_successes || 0) + (row.verification_failures || 0),
         verificationSuccesses: row.verification_successes || 0,
         isVerificationGateway: false, // Will be enriched later
       }));

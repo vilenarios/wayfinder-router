@@ -138,6 +138,16 @@ Four routing strategies determine how gateways are selected for content fetching
 
 The `temperature` strategy uses `GatewayTemperatureCache` to track performance metrics. Gateways with better recent performance have higher probability of selection, but slower gateways still receive some traffic (to detect improvements).
 
+### Arweave HTTP API Proxy
+The router can proxy Arweave node HTTP API requests (`/info`, `/tx/{id}`, `/block/height/{h}`, etc.) to actual Arweave mining/full nodes. This is separate from ar.io gateway content:
+
+- **Node Selection**: `ArweaveNodeSelector` (`src/services/arweave-node-selector.ts`) - round-robin selection with separate read/write node pools
+- **Fetcher**: `ArweaveApiFetcher` (`src/services/arweave-api-fetcher.ts`) - handles caching with category-aware TTLs (immutable vs dynamic data)
+- **Handlers**: `src/handlers/arweave-api.ts` - proxy and route handlers
+- **Types**: `src/types/arweave-api.ts` - endpoint definitions and path construction
+
+Supported endpoints: `/info`, `/peers`, `/tx/{id}`, `/tx/{id}/status`, `/tx/{id}/{field}`, `/tx/{id}/data`, `/wallet/{addr}/balance`, `/wallet/{addr}/last_tx`, `/price/{bytes}`, `/block/hash/{hash}`, `/block/height/{height}`
+
 ### Graceful Shutdown
 The `ShutdownManager` (`src/utils/shutdown-manager.ts`) handles SIGTERM/SIGINT with a drain period for in-flight requests before force exit. Configuration via `SHUTDOWN_DRAIN_TIMEOUT_MS` and `SHUTDOWN_TIMEOUT_MS`.
 
@@ -154,6 +164,17 @@ Router management endpoints are under the `/wayfinder/` prefix:
 | `/wayfinder/stats/gateways` | Gateway performance statistics |
 | `/graphql` | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
 
+Arweave HTTP API endpoints (when `ARWEAVE_API_ENABLED=true`):
+
+| Endpoint | Description |
+|----------|-------------|
+| `/info` | Network info (current height, version) |
+| `/peers` | Connected peers list |
+| `/tx/{id}` | Transaction by ID |
+| `/tx/{id}/status` | Transaction confirmation status |
+| `/wallet/{addr}/balance` | Wallet balance |
+| `/block/height/{h}` | Block by height |
+
 Content is served at:
 - `/{txId}` or `/{txId}/path/to/file` - Transaction ID requests
 - `http://{arns-name}.localhost:3000/` - ArNS subdomain requests
@@ -167,6 +188,7 @@ All configuration via environment variables. See `.env.example` for full list. K
 **Verification**: `VERIFICATION_ENABLED`, `VERIFICATION_GATEWAY_SOURCE`, `VERIFICATION_GATEWAY_COUNT`
 **Routing**: `ROUTING_STRATEGY`, `ROUTING_GATEWAY_SOURCE`, `ROUTING_STATIC_GATEWAYS`
 **Cache**: `CONTENT_CACHE_ENABLED`, `CONTENT_CACHE_MAX_SIZE_BYTES`, `ARNS_CACHE_TTL_MS`
+**Arweave API**: `ARWEAVE_API_ENABLED`, `ARWEAVE_READ_NODES`, `ARWEAVE_WRITE_NODES`
 
 ### Root Host Configuration
 
