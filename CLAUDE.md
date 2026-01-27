@@ -97,11 +97,13 @@ declare module "hono" {
 - `better-sqlite3` - Telemetry storage
 - `pino` / `pino-pretty` - Logging
 - `lru-cache` - Content and manifest caching
+- `undici` - HTTP client with connection pooling (`src/http/http-client.ts`)
 
 ### TypeScript
 - Strict mode enabled with `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`
 - All imports must use `.js` extension (ESM requirement, even for `.ts` files)
 - Unused variables prefixed with `_` are allowed (eslint rule: `argsIgnorePattern: '^_'`)
+- Target ES2022, module NodeNext
 
 ### Verification Architecture
 The router separates **routing** (where to fetch data) from **verification** (who to trust for hashes):
@@ -128,6 +130,9 @@ Four routing strategies determine how gateways are selected for content fetching
 | `temperature` | Weighted selection based on recent latency and success rate |
 
 The `temperature` strategy uses `GatewayTemperatureCache` to track performance metrics. Gateways with better recent performance have higher probability of selection, but slower gateways still receive some traffic (to detect improvements).
+
+### Graceful Shutdown
+The `ShutdownManager` (`src/utils/shutdown-manager.ts`) handles SIGTERM/SIGINT with a drain period for in-flight requests before force exit. Configuration via `SHUTDOWN_DRAIN_TIMEOUT_MS` and `SHUTDOWN_TIMEOUT_MS`.
 
 ## API Endpoints
 

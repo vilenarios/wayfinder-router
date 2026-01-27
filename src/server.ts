@@ -52,6 +52,10 @@ import {
 import { createProxyHandler } from "./handlers/proxy.js";
 import { createRouteHandler } from "./handlers/route.js";
 import {
+  createArweaveApiProxyHandler,
+  createArweaveApiRouteHandler,
+} from "./handlers/arweave-api.js";
+import {
   createHealthHandler,
   createReadyHandler,
   createMetricsHandler,
@@ -67,6 +71,15 @@ import {
   createDisabledTelemetryService,
 } from "./telemetry/service.js";
 import { ContentCache } from "./cache/content-cache.js";
+import { ArweaveApiCache } from "./cache/arweave-api-cache.js";
+import {
+  createArweaveNodeSelector,
+  ArweaveNodeSelector,
+} from "./services/arweave-node-selector.js";
+import {
+  createArweaveApiFetcher,
+  ArweaveApiFetcher,
+} from "./services/arweave-api-fetcher.js";
 
 // Extend Hono context with our custom variables
 declare module "hono" {
@@ -91,6 +104,12 @@ export interface RouterServices {
   requestTracker: RequestTracker;
   /** HTTP client with connection pooling */
   httpClient: HttpClient;
+  /** Arweave API cache (null if disabled) */
+  arweaveApiCache: ArweaveApiCache | null;
+  /** Arweave node selector (null if disabled) */
+  arweaveNodeSelector: ArweaveNodeSelector | null;
+  /** Arweave API fetcher (null if disabled) */
+  arweaveApiFetcher: ArweaveApiFetcher | null;
 }
 
 export interface CreateServerOptions {
@@ -232,6 +251,48 @@ export function createServer(options: CreateServerOptions) {
     );
   }
 
+  // Initialize Arweave API services if enabled
+  let arweaveApiCache: ArweaveApiCache | null = null;
+  let arweaveNodeSelector: ArweaveNodeSelector | null = null;
+  let arweaveApiFetcher: ArweaveApiFetcher | null = null;
+
+  if (config.arweaveApi.enabled) {
+    // Create Arweave API cache
+    if (config.arweaveApi.cache.enabled) {
+      arweaveApiCache = new ArweaveApiCache({
+        enabled: true,
+        immutableTtlMs: config.arweaveApi.cache.immutableTtlMs,
+        dynamicTtlMs: config.arweaveApi.cache.dynamicTtlMs,
+        maxEntries: config.arweaveApi.cache.maxEntries,
+        maxSizeBytes: config.arweaveApi.cache.maxSizeBytes,
+        logger,
+      });
+      logger.info("Arweave API cache initialized", {
+        immutableTtlMs: config.arweaveApi.cache.immutableTtlMs,
+        dynamicTtlMs: config.arweaveApi.cache.dynamicTtlMs,
+        maxEntries: config.arweaveApi.cache.maxEntries,
+      });
+    }
+
+    // Create Arweave node selector
+    arweaveNodeSelector = createArweaveNodeSelector(config, logger);
+
+    // Create Arweave API fetcher
+    if (arweaveNodeSelector) {
+      arweaveApiFetcher = createArweaveApiFetcher(
+        arweaveNodeSelector,
+        arweaveApiCache,
+        config,
+        logger,
+        (url, options) => httpClient.fetch(url, options),
+      );
+      logger.info("Arweave API proxy enabled", {
+        nodes: config.arweaveApi.nodes.map((n) => n.hostname),
+        cacheEnabled: config.arweaveApi.cache.enabled,
+      });
+    }
+  }
+
   const services: RouterServices = {
     arnsResolver,
     gatewaySelector,
@@ -245,6 +306,9 @@ export function createServer(options: CreateServerOptions) {
     pingService,
     requestTracker,
     httpClient,
+    arweaveApiCache,
+    arweaveNodeSelector,
+    arweaveApiFetcher,
   };
 
   // Create Hono app
@@ -307,6 +371,11 @@ export function createServer(options: CreateServerOptions) {
 
     // Add HTTP connection pool metrics
     metrics += httpClient.getPrometheusMetrics();
+
+    // Add Arweave API cache metrics if enabled
+    if (arweaveApiCache) {
+      metrics += arweaveApiCache.getPrometheusMetrics();
+    }
 
     return new Response(metrics, {
       status: 200,
@@ -377,7 +446,8 @@ export function createServer(options: CreateServerOptions) {
       return c.json(
         {
           error: "Not Found",
-          message: "This router is configured to serve root domain content only.",
+          message:
+            "This router is configured to serve root domain content only.",
         },
         404,
       );
@@ -447,6 +517,43 @@ export function createServer(options: CreateServerOptions) {
       }
 
       return c.json({ error: "Not Found", path: requestInfo.path }, 404);
+    }
+
+    // Handle Arweave API requests
+    if (requestInfo.type === "arweave-api") {
+      if (!arweaveApiFetcher || !arweaveNodeSelector) {
+        return c.json(
+          {
+            error: "Arweave API proxy not configured",
+            message: "Set ARWEAVE_API_ENABLED=true and configure ARWEAVE_NODES",
+          },
+          404,
+        );
+      }
+
+      try {
+        const arweaveApiDeps = {
+          fetcher: arweaveApiFetcher,
+          nodeSelector: arweaveNodeSelector,
+          config,
+          logger,
+          telemetryService,
+        };
+
+        if (routerMode === "route") {
+          const handler = createArweaveApiRouteHandler(arweaveApiDeps);
+          return await handler(c);
+        } else {
+          const handler = createArweaveApiProxyHandler(arweaveApiDeps);
+          return await handler(c);
+        }
+      } catch (error) {
+        return createErrorResponse(
+          c,
+          error instanceof Error ? error : new Error(String(error)),
+          logger,
+        );
+      }
     }
 
     // Route to appropriate handler based on mode

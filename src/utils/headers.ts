@@ -229,3 +229,69 @@ export function extractVerificationHeaders(
 
   return result;
 }
+
+/**
+ * Add Arweave node header to response
+ * Indicates which Arweave node served the request
+ */
+export function addArweaveNodeHeader(headers: Headers, node: URL): void {
+  headers.set("x-arweave-node", node.hostname);
+}
+
+/**
+ * Create headers for Arweave API proxy requests
+ */
+export function createArweaveApiRequestHeaders(params: {
+  originalHeaders?: Headers;
+  traceId?: string;
+}): Headers {
+  const headers = new Headers();
+
+  // Add wayfinder identification
+  headers.set("x-ar-io-component", "wayfinder-router");
+
+  // Add trace ID if provided
+  if (params.traceId) {
+    headers.set("x-ar-io-trace-id", params.traceId);
+  }
+
+  // Forward relevant headers from original request
+  if (params.originalHeaders) {
+    const forwardHeaders = ["accept", "accept-language"];
+
+    for (const name of forwardHeaders) {
+      const value = params.originalHeaders.get(name);
+      if (value) {
+        headers.set(name, value);
+      }
+    }
+  }
+
+  return headers;
+}
+
+/**
+ * Filter response headers from Arweave node responses
+ * More permissive than gateway filtering since we trust the content
+ */
+export function filterArweaveApiResponseHeaders(
+  arweaveHeaders: Headers,
+): Headers {
+  const headers = new Headers();
+
+  arweaveHeaders.forEach((value, name) => {
+    const lowerName = name.toLowerCase();
+
+    // Skip security-sensitive headers
+    if (STRIPPED_HEADERS.has(lowerName)) {
+      return;
+    }
+
+    // Include standard passthrough headers
+    if (PASSTHROUGH_HEADERS.has(lowerName)) {
+      headers.set(name, value);
+    }
+  });
+
+  return headers;
+}

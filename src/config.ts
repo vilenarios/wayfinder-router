@@ -247,6 +247,35 @@ export function loadConfig(): RouterConfig {
       requestTimeoutMs: getEnvInt("HTTP_REQUEST_TIMEOUT_MS", 30_000),
       keepAliveTimeoutMs: getEnvInt("HTTP_KEEPALIVE_TIMEOUT_MS", 60_000),
     },
+
+    // Arweave HTTP API proxy settings
+    arweaveApi: {
+      enabled: getEnvBool("ARWEAVE_API_ENABLED", false),
+      nodes: parseUrls(
+        getEnv(
+          "ARWEAVE_NODES",
+          "http://tip-1.arweave.xyz:1984,http://tip-2.arweave.xyz:1984,http://tip-3.arweave.xyz:1984,http://tip-4.arweave.xyz:1984,http://tip-5.arweave.xyz:1984",
+        ),
+      ),
+      cache: {
+        enabled: getEnvBool("ARWEAVE_API_CACHE_ENABLED", true),
+        // 24 hours for immutable data (transactions, blocks)
+        immutableTtlMs: getEnvInt(
+          "ARWEAVE_API_CACHE_IMMUTABLE_TTL_MS",
+          24 * 60 * 60 * 1000,
+        ),
+        // 30 seconds for dynamic data (info, balances, status)
+        dynamicTtlMs: getEnvInt("ARWEAVE_API_CACHE_DYNAMIC_TTL_MS", 30_000),
+        maxEntries: getEnvInt("ARWEAVE_API_CACHE_MAX_ENTRIES", 10_000),
+        maxSizeBytes: getEnvNumber(
+          "ARWEAVE_API_CACHE_MAX_SIZE_BYTES",
+          100 * 1024 * 1024, // 100MB default
+        ),
+      },
+      retryAttempts: getEnvInt("ARWEAVE_API_RETRY_ATTEMPTS", 3),
+      retryDelayMs: getEnvInt("ARWEAVE_API_RETRY_DELAY_MS", 100),
+      timeoutMs: getEnvInt("ARWEAVE_API_TIMEOUT_MS", 30_000),
+    },
   };
 }
 
@@ -509,6 +538,54 @@ export function validateConfig(config: RouterConfig): void {
     throw new Error(
       `HTTP_KEEPALIVE_TIMEOUT_MS must be between 10000 (10s) and 300000 (5 min), got ${config.http.keepAliveTimeoutMs}`,
     );
+  }
+
+  // === ARWEAVE API VALIDATION ===
+
+  if (config.arweaveApi.enabled) {
+    if (config.arweaveApi.nodes.length === 0) {
+      throw new Error(
+        "ARWEAVE_API_ENABLED is true but no ARWEAVE_NODES configured",
+      );
+    }
+
+    if (
+      config.arweaveApi.retryAttempts < 1 ||
+      config.arweaveApi.retryAttempts > 10
+    ) {
+      throw new Error(
+        `ARWEAVE_API_RETRY_ATTEMPTS must be between 1 and 10, got ${config.arweaveApi.retryAttempts}`,
+      );
+    }
+
+    if (
+      config.arweaveApi.timeoutMs < 1000 ||
+      config.arweaveApi.timeoutMs > 120_000
+    ) {
+      throw new Error(
+        `ARWEAVE_API_TIMEOUT_MS must be between 1000 (1s) and 120000 (2 min), got ${config.arweaveApi.timeoutMs}`,
+      );
+    }
+
+    if (config.arweaveApi.cache.enabled) {
+      if (config.arweaveApi.cache.maxEntries < 100) {
+        throw new Error(
+          `ARWEAVE_API_CACHE_MAX_ENTRIES must be at least 100, got ${config.arweaveApi.cache.maxEntries}`,
+        );
+      }
+
+      if (config.arweaveApi.cache.dynamicTtlMs < 1000) {
+        throw new Error(
+          `ARWEAVE_API_CACHE_DYNAMIC_TTL_MS must be at least 1000 (1s), got ${config.arweaveApi.cache.dynamicTtlMs}`,
+        );
+      }
+
+      if (config.arweaveApi.cache.immutableTtlMs < 60_000) {
+        throw new Error(
+          `ARWEAVE_API_CACHE_IMMUTABLE_TTL_MS must be at least 60000 (1 min), got ${config.arweaveApi.cache.immutableTtlMs}`,
+        );
+      }
+    }
   }
 
   // === ROOT HOST RESTRICTION VALIDATION ===

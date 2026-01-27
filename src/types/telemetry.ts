@@ -29,8 +29,8 @@ export interface GatewayRequestEvent {
   gateway: string;
 
   // Request details
-  requestType: "arns" | "txid";
-  identifier: string; // ArNS name or txId
+  requestType: "arns" | "txid" | "arweave-api";
+  identifier: string; // ArNS name, txId, or Arweave API endpoint
   path: string;
   mode: "proxy" | "route";
 

@@ -3,7 +3,12 @@
  */
 
 // Request types
-export type RequestType = "arns" | "txid" | "reserved" | "blocked";
+export type RequestType =
+  | "arns"
+  | "txid"
+  | "reserved"
+  | "blocked"
+  | "arweave-api";
 
 export interface ArnsRequestInfo {
   type: "arns";
@@ -30,11 +35,28 @@ export interface BlockedRequestInfo {
   path: string;
 }
 
+// Re-export Arweave API types
+export type {
+  ArweaveApiEndpoint,
+  ArweaveApiCategory,
+  ArweaveApiRequestInfo,
+} from "./arweave-api.js";
+export {
+  VALID_TX_FIELDS,
+  ENDPOINT_CATEGORIES,
+  getEndpointCategory,
+  constructArweaveApiPath,
+} from "./arweave-api.js";
+
+// Import for union type
+import type { ArweaveApiRequestInfo } from "./arweave-api.js";
+
 export type RequestInfo =
   | ArnsRequestInfo
   | TxIdRequestInfo
   | ReservedRequestInfo
-  | BlockedRequestInfo;
+  | BlockedRequestInfo
+  | ArweaveApiRequestInfo;
 
 // Router modes
 export type RouterMode = "proxy" | "route";
@@ -210,6 +232,32 @@ export interface RouterConfig {
     requestTimeoutMs: number;
     /** Keep-alive timeout in ms */
     keepAliveTimeoutMs: number;
+  };
+
+  // Arweave HTTP API proxy settings
+  arweaveApi: {
+    /** Enable Arweave API proxy/routing */
+    enabled: boolean;
+    /** Arweave node URLs to proxy requests to */
+    nodes: URL[];
+    /** Cache settings */
+    cache: {
+      enabled: boolean;
+      /** TTL for immutable data (tx, blocks) in ms */
+      immutableTtlMs: number;
+      /** TTL for dynamic data (info, balances, status) in ms */
+      dynamicTtlMs: number;
+      /** Maximum cache entries */
+      maxEntries: number;
+      /** Maximum cache size in bytes */
+      maxSizeBytes: number;
+    };
+    /** Retry attempts for failed requests */
+    retryAttempts: number;
+    /** Delay between retries in ms */
+    retryDelayMs: number;
+    /** Request timeout in ms */
+    timeoutMs: number;
   };
 }
 

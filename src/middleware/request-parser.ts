@@ -5,6 +5,11 @@
 
 import type { Context, Next } from "hono";
 import type { RequestInfo, RouterConfig } from "../types/index.js";
+import type {
+  ArweaveApiEndpoint,
+  ArweaveApiRequestInfo,
+} from "../types/arweave-api.js";
+import { VALID_TX_FIELDS, getEndpointCategory } from "../types/arweave-api.js";
 import { isTxId, normalizePath, isValidSandbox } from "../utils/url.js";
 
 // Reserved paths that should not be treated as transaction IDs or ArNS paths
@@ -38,6 +43,184 @@ function isReservedPath(pathname: string): boolean {
   }
 
   return false;
+}
+
+// Regex patterns for Arweave API endpoints
+// Transaction ID: 43 base64url characters
+const TX_ID_PATTERN = "[A-Za-z0-9_-]{43}";
+// Block hash: 64 hex characters (SHA-256)
+const BLOCK_HASH_PATTERN = "[A-Za-z0-9_-]{64}";
+// Wallet address: 43 base64url characters (same as txId)
+const WALLET_ADDR_PATTERN = "[A-Za-z0-9_-]{43}";
+
+/**
+ * Parse Arweave API paths
+ * Returns ArweaveApiRequestInfo if path matches an Arweave API endpoint, null otherwise
+ */
+function parseArweaveApiPath(pathname: string): ArweaveApiRequestInfo | null {
+  // Remove leading slash for easier matching
+  const path = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+  const segments = path.split("/");
+
+  // /info
+  if (path === "info") {
+    return createArweaveApiRequest("info", {}, pathname);
+  }
+
+  // /peers
+  if (path === "peers") {
+    return createArweaveApiRequest("peers", {}, pathname);
+  }
+
+  // /tx/{id}... endpoints
+  if (segments[0] === "tx" && segments.length >= 2) {
+    const txId = segments[1];
+
+    // Validate txId format (43 base64url chars)
+    if (!txId || !new RegExp(`^${TX_ID_PATTERN}$`).test(txId)) {
+      return null;
+    }
+
+    // /tx/{id}
+    if (segments.length === 2) {
+      return createArweaveApiRequest("tx", { id: txId }, pathname);
+    }
+
+    // /tx/{id}/status
+    if (segments.length === 3 && segments[2] === "status") {
+      return createArweaveApiRequest("tx-status", { id: txId }, pathname);
+    }
+
+    // /tx/{id}/offset
+    if (segments.length === 3 && segments[2] === "offset") {
+      return createArweaveApiRequest("tx-offset", { id: txId }, pathname);
+    }
+
+    // /tx/{id}/data or /tx/{id}/data.{extension}
+    if (segments.length === 3 && segments[2].startsWith("data")) {
+      const dataSegment = segments[2];
+      if (dataSegment === "data") {
+        return createArweaveApiRequest("tx-data", { id: txId }, pathname);
+      }
+      // Check for data.{extension} pattern
+      const extMatch = dataSegment.match(/^data\.(\w+)$/);
+      if (extMatch) {
+        return createArweaveApiRequest(
+          "tx-data",
+          { id: txId, extension: extMatch[1] },
+          pathname,
+        );
+      }
+    }
+
+    // /tx/{id}/{field} - must be a valid field name
+    if (segments.length === 3) {
+      const field = segments[2];
+      if (VALID_TX_FIELDS.has(field)) {
+        return createArweaveApiRequest(
+          "tx-field",
+          { id: txId, field },
+          pathname,
+        );
+      }
+    }
+
+    return null;
+  }
+
+  // /wallet/{address}/... endpoints
+  if (segments[0] === "wallet" && segments.length === 3) {
+    const address = segments[1];
+
+    // Validate address format (43 base64url chars)
+    if (!address || !new RegExp(`^${WALLET_ADDR_PATTERN}$`).test(address)) {
+      return null;
+    }
+
+    // /wallet/{address}/balance
+    if (segments[2] === "balance") {
+      return createArweaveApiRequest("wallet-balance", { address }, pathname);
+    }
+
+    // /wallet/{address}/last_tx
+    if (segments[2] === "last_tx") {
+      return createArweaveApiRequest("wallet-last-tx", { address }, pathname);
+    }
+
+    return null;
+  }
+
+  // /price/{bytes} or /price/{bytes}/{target}
+  if (segments[0] === "price" && segments.length >= 2) {
+    const bytes = segments[1];
+
+    // Validate bytes is a positive integer
+    if (!bytes || !/^\d+$/.test(bytes)) {
+      return null;
+    }
+
+    // /price/{bytes}
+    if (segments.length === 2) {
+      return createArweaveApiRequest("price", { bytes }, pathname);
+    }
+
+    // /price/{bytes}/{target}
+    if (segments.length === 3) {
+      const target = segments[2];
+      // Validate target format (43 base64url chars)
+      if (new RegExp(`^${WALLET_ADDR_PATTERN}$`).test(target)) {
+        return createArweaveApiRequest(
+          "price-target",
+          { bytes, target },
+          pathname,
+        );
+      }
+    }
+
+    return null;
+  }
+
+  // /block/hash/{hash} or /block/height/{height}
+  if (segments[0] === "block" && segments.length === 3) {
+    // /block/hash/{hash}
+    if (segments[1] === "hash") {
+      const hash = segments[2];
+      // Block hash is 64 characters (indep_hash)
+      if (hash && new RegExp(`^${BLOCK_HASH_PATTERN}$`).test(hash)) {
+        return createArweaveApiRequest("block-hash", { hash }, pathname);
+      }
+    }
+
+    // /block/height/{height}
+    if (segments[1] === "height") {
+      const height = segments[2];
+      // Height must be a non-negative integer
+      if (height && /^\d+$/.test(height)) {
+        return createArweaveApiRequest("block-height", { height }, pathname);
+      }
+    }
+
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * Helper to create ArweaveApiRequestInfo
+ */
+function createArweaveApiRequest(
+  endpoint: ArweaveApiEndpoint,
+  params: Record<string, string>,
+  path: string,
+): ArweaveApiRequestInfo {
+  return {
+    type: "arweave-api",
+    endpoint,
+    category: getEndpointCategory(endpoint),
+    params,
+    path,
+  };
 }
 
 /**
@@ -124,6 +307,15 @@ export function parseRequest(
       type: "reserved",
       path: url.pathname,
     };
+  }
+
+  // Check Arweave API paths BEFORE txId check (only on root domain)
+  // This is critical because /tx/{id} would otherwise match as content request
+  if (requestHost === baseHost) {
+    const arweaveApi = parseArweaveApiPath(url.pathname);
+    if (arweaveApi) {
+      return arweaveApi;
+    }
   }
 
   // Check if first segment is a valid transaction ID (exactly 43 base64url chars)
