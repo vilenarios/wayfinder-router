@@ -139,26 +139,8 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
       traceId,
     });
 
-    // Check if we need to redirect to sandbox subdomain first
-    if (!sandboxSubdomain) {
-      // No sandbox subdomain - redirect to router with sandbox
-      const sandbox = sandboxFromTxId(txId);
-      const { config } = deps;
-      const protocol = c.req.url.startsWith("https") ? "https" : "http";
-      const redirectUrl = `${protocol}://${sandbox}.${config.server.baseDomain}/${txId}${path}`;
-
-      logger.info("Redirecting to sandbox subdomain", {
-        txId,
-        sandbox,
-        redirectUrl,
-        traceId,
-      });
-
-      return c.redirect(redirectUrl, 302);
-    }
-
-    // Validate sandbox matches txId (security check)
-    if (!validateSandboxForTxId(sandboxSubdomain, txId)) {
+    // If request came via sandbox subdomain, validate it matches txId
+    if (sandboxSubdomain && !validateSandboxForTxId(sandboxSubdomain, txId)) {
       logger.warn("Sandbox subdomain mismatch", {
         txId,
         sandboxSubdomain,
@@ -177,7 +159,8 @@ export function createRouteHandler(deps: RouteHandlerDeps) {
     // Select a gateway
     const gateway = await gatewaySelector.selectForTransaction(txId, path);
 
-    // Construct redirect URL using sandbox subdomain
+    // Construct redirect URL using sandbox subdomain on the gateway
+    // Route mode redirects directly to gateway - no intermediate local sandbox
     const redirectUrl = constructGatewayUrl({
       gateway,
       txId,

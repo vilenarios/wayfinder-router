@@ -329,10 +329,59 @@ export function createServer(options: CreateServerOptions) {
   );
   app.get("/wayfinder/stats/export", createRewardExportHandler(statsDeps));
 
+  // GraphQL proxy handler
+  app.all("/graphql", async (c) => {
+    if (!config.server.graphqlProxyUrl) {
+      return c.json({ error: "GraphQL proxy not configured" }, 404);
+    }
+
+    try {
+      // Proxy the request to configured URL
+      const response = await fetch(config.server.graphqlProxyUrl, {
+        method: c.req.method,
+        headers: {
+          "Content-Type": c.req.header("content-type") || "application/json",
+          Accept: c.req.header("accept") || "application/json",
+        },
+        body: c.req.method !== "GET" ? await c.req.text() : undefined,
+      });
+
+      // Return proxied response with upstream header
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          "Content-Type":
+            response.headers.get("content-type") || "application/json",
+          "x-wayfinder-graphql-upstream": config.server.graphqlProxyUrl,
+        },
+      });
+    } catch (error) {
+      logger.error("GraphQL proxy error", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return c.json({ error: "GraphQL proxy request failed" }, 502);
+    }
+  });
+
   // Main request handler
   app.all("*", async (c) => {
     const requestInfo = c.get("requestInfo");
     const routerMode = c.get("routerMode");
+
+    // Handle blocked requests (when RESTRICT_TO_ROOT_HOST is enabled)
+    if (requestInfo.type === "blocked") {
+      logger.debug("Request blocked by restriction mode", {
+        reason: requestInfo.reason,
+        path: requestInfo.path,
+      });
+      return c.json(
+        {
+          error: "Not Found",
+          message: "This router is configured to serve root domain content only.",
+        },
+        404,
+      );
+    }
 
     // Handle reserved paths
     if (requestInfo.type === "reserved") {
@@ -346,8 +395,12 @@ export function createServer(options: CreateServerOptions) {
           version: process.env.npm_package_version || "0.1.0",
           description: "Lightweight proxy router for ar.io network gateways",
           endpoints: {
-            arns: "https://{arnsName}." + config.server.baseDomain,
-            txid: "https://" + config.server.baseDomain + "/{txId}",
+            arns: config.server.restrictToRootHost
+              ? null
+              : "https://{arnsName}." + config.server.baseDomain,
+            txid: config.server.restrictToRootHost
+              ? null
+              : "https://" + config.server.baseDomain + "/{txId}",
             health: "/wayfinder/health",
             ready: "/wayfinder/ready",
             metrics: "/wayfinder/metrics",
@@ -358,22 +411,27 @@ export function createServer(options: CreateServerOptions) {
           verification: {
             enabled: config.verification.enabled,
           },
-          arnsRootHost: config.server.arnsRootHost || null,
+          rootHostContent: config.server.rootHostContent || null,
+          restrictToRootHost: config.server.restrictToRootHost,
         });
       }
 
-      // Root path without ArNS root host configured - show info page
+      // Root path without root host content configured - show info page
       if (
         (requestInfo.path === "/" || requestInfo.path === "") &&
-        !config.server.arnsRootHost
+        !config.server.rootHostContent
       ) {
         return c.json({
           name: "Wayfinder Router",
           version: process.env.npm_package_version || "0.1.0",
           description: "Lightweight proxy router for ar.io network gateways",
           endpoints: {
-            arns: "https://{arnsName}." + config.server.baseDomain,
-            txid: "https://" + config.server.baseDomain + "/{txId}",
+            arns: config.server.restrictToRootHost
+              ? null
+              : "https://{arnsName}." + config.server.baseDomain,
+            txid: config.server.restrictToRootHost
+              ? null
+              : "https://" + config.server.baseDomain + "/{txId}",
             health: "/wayfinder/health",
             ready: "/wayfinder/ready",
             metrics: "/wayfinder/metrics",
@@ -384,6 +442,7 @@ export function createServer(options: CreateServerOptions) {
           verification: {
             enabled: config.verification.enabled,
           },
+          restrictToRootHost: config.server.restrictToRootHost,
         });
       }
 

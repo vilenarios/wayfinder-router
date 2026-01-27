@@ -5,10 +5,12 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 ## Features
 
 - **Content Verification** - Verifies content integrity via hash checking against trusted gateways
-- **Smart Gateway Selection** - Multiple routing strategies (fastest, random, round-robin) with health tracking
+- **Smart Gateway Selection** - Multiple routing strategies (fastest, random, round-robin, temperature) with health tracking
 - **ArNS Support** - Resolves Arweave Name System names with consensus verification
 - **Manifest Verification** - Verifies path manifests and their content mappings
-- **Root Domain Hosting** - Serve any ArNS name directly at your root domain
+- **Root Domain Hosting** - Serve any ArNS name or txId directly at your root domain
+- **Restrict to Root Host Mode** - Lock down router to serve only root domain content
+- **GraphQL Proxy** - Proxy GraphQL requests to an upstream Arweave query endpoint
 - **Two Operating Modes**:
   - `proxy` - Fetches, verifies, and serves content
   - `route` - Redirects clients to gateway URLs
@@ -46,16 +48,44 @@ The server starts at `http://localhost:3000` by default.
 
 ### Root Domain Hosting
 
-Configure `ARNS_ROOT_HOST` to serve an ArNS name at your root domain:
+Configure `ROOT_HOST_CONTENT` to serve an ArNS name or transaction ID at your root domain:
 ```bash
-# In .env
-ARNS_ROOT_HOST=wayfinder
+# In .env - serve an ArNS name
+ROOT_HOST_CONTENT=wayfinder
+
+# Or serve a transaction ID directly
+ROOT_HOST_CONTENT=bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U
 ```
 
 With this configuration:
-- `https://yourdomain.com/` → Serves ArNS "wayfinder" content
-- `https://yourdomain.com/docs` → Serves ArNS "wayfinder" at path `/docs`
+- `https://yourdomain.com/` → Serves the configured content
+- `https://yourdomain.com/docs` → Serves at path `/docs`
 - `https://yourdomain.com/wayfinder/info` → Router info page
+
+### Restrict to Root Host Only
+
+Lock down the router to serve only root domain content:
+```bash
+# In .env
+ROOT_HOST_CONTENT=wayfinder
+RESTRICT_TO_ROOT_HOST=true
+```
+
+When enabled:
+- Subdomain requests are rejected with 404
+- TxId path requests (e.g., `/{txId}`) are rejected with 404
+- Root domain paths work normally
+- Router management endpoints (`/wayfinder/*`) still work
+
+### GraphQL Proxy
+
+Proxy `/graphql` requests to an upstream GraphQL endpoint:
+```bash
+# In .env
+GRAPHQL_PROXY_URL=https://arweave-search.goldsky.com/graphql
+```
+
+When configured, clients can query Arweave data via `https://yourdomain.com/graphql`.
 
 ### ArNS Subdomain Requests
 
@@ -86,7 +116,7 @@ Configuration is managed via environment variables. See [.env.example](.env.exam
 
 ## API Endpoints
 
-All router endpoints are under the `/wayfinder/` prefix:
+Router management endpoints are under the `/wayfinder/` prefix:
 
 | Endpoint | Description |
 |----------|-------------|
@@ -95,8 +125,9 @@ All router endpoints are under the `/wayfinder/` prefix:
 | `/wayfinder/metrics` | Prometheus metrics |
 | `/wayfinder/info` | Router info and configuration |
 | `/wayfinder/stats/gateways` | Gateway performance statistics |
+| `/graphql` | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
 
-When `ARNS_ROOT_HOST` is not set, the root endpoint (`/`) also displays router info.
+When `ROOT_HOST_CONTENT` is not set, the root endpoint (`/`) displays router info.
 
 ## Docker
 

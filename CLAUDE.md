@@ -11,6 +11,8 @@ Wayfinder Router is a lightweight proxy router for the ar.io network. It acts as
 - Manifest verification for path-based content (Arweave manifests)
 - Caching for verified content, manifests, and ArNS resolutions
 - Two operating modes: `proxy` (fetch, verify, serve) and `route` (redirect to gateway)
+- Root domain hosting with optional "restrict to root host only" mode
+- GraphQL proxy for upstream Arweave query endpoints
 
 ## Requirements
 
@@ -27,6 +29,12 @@ npm run typecheck    # Type-check without emitting
 npm run test         # Run tests once with vitest
 npm run test:watch   # Run tests in watch mode
 npx vitest run src/path/to/file.test.ts  # Run a single test file
+
+# Linting and formatting
+npm run lint         # Run ESLint on src/
+npm run lint:fix     # Auto-fix ESLint issues
+npm run format       # Format code with Prettier
+npm run format:check # Check formatting without changes
 
 # CLI utilities
 npm run stats        # Show gateway telemetry statistics
@@ -93,6 +101,7 @@ declare module "hono" {
 ### TypeScript
 - Strict mode enabled with `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`
 - All imports must use `.js` extension (ESM requirement, even for `.ts` files)
+- Unused variables prefixed with `_` are allowed (eslint rule: `argsIgnorePattern: '^_'`)
 
 ### Verification Architecture
 The router separates **routing** (where to fetch data) from **verification** (who to trust for hashes):
@@ -120,12 +129,35 @@ Four routing strategies determine how gateways are selected for content fetching
 
 The `temperature` strategy uses `GatewayTemperatureCache` to track performance metrics. Gateways with better recent performance have higher probability of selection, but slower gateways still receive some traffic (to detect improvements).
 
+## API Endpoints
+
+Router management endpoints are under the `/wayfinder/` prefix:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/wayfinder/health` | Health check |
+| `/wayfinder/ready` | Readiness check |
+| `/wayfinder/metrics` | Prometheus metrics |
+| `/wayfinder/info` | Router info and configuration |
+| `/wayfinder/stats/gateways` | Gateway performance statistics |
+| `/graphql` | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
+
+Content is served at:
+- `/{txId}` or `/{txId}/path/to/file` - Transaction ID requests
+- `http://{arns-name}.localhost:3000/` - ArNS subdomain requests
+
 ## Configuration
 
 All configuration via environment variables. See `.env.example` for full list. Key variables:
 
-**Server**: `PORT`, `HOST`, `BASE_DOMAIN`, `ARNS_ROOT_HOST`
+**Server**: `PORT`, `HOST`, `BASE_DOMAIN`, `ROOT_HOST_CONTENT`, `RESTRICT_TO_ROOT_HOST`, `GRAPHQL_PROXY_URL`
 **Mode**: `DEFAULT_MODE` (`proxy`/`route`), `ALLOW_MODE_OVERRIDE`
 **Verification**: `VERIFICATION_ENABLED`, `VERIFICATION_GATEWAY_SOURCE`, `VERIFICATION_GATEWAY_COUNT`
 **Routing**: `ROUTING_STRATEGY`, `ROUTING_GATEWAY_SOURCE`, `ROUTING_STATIC_GATEWAYS`
 **Cache**: `CONTENT_CACHE_ENABLED`, `CONTENT_CACHE_MAX_SIZE_BYTES`, `ARNS_CACHE_TTL_MS`
+
+### Root Host Configuration
+
+- `ROOT_HOST_CONTENT` - Content to serve at root domain (ArNS name or txId, auto-detected). Backwards compatible with `ARNS_ROOT_HOST`.
+- `RESTRICT_TO_ROOT_HOST` - When `true`, blocks subdomain and txId path requests (404), only serves root domain content.
+- `GRAPHQL_PROXY_URL` - When set, `/graphql` proxies to this upstream GraphQL endpoint.

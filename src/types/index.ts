@@ -3,7 +3,7 @@
  */
 
 // Request types
-export type RequestType = "arns" | "txid" | "reserved";
+export type RequestType = "arns" | "txid" | "reserved" | "blocked";
 
 export interface ArnsRequestInfo {
   type: "arns";
@@ -24,10 +24,17 @@ export interface ReservedRequestInfo {
   path: string;
 }
 
+export interface BlockedRequestInfo {
+  type: "blocked";
+  reason: "subdomain_restricted" | "txid_path_restricted";
+  path: string;
+}
+
 export type RequestInfo =
   | ArnsRequestInfo
   | TxIdRequestInfo
-  | ReservedRequestInfo;
+  | ReservedRequestInfo
+  | BlockedRequestInfo;
 
 // Router modes
 export type RouterMode = "proxy" | "route";
@@ -51,8 +58,23 @@ export interface RouterConfig {
     port: number;
     host: string;
     baseDomain: string;
-    /** ArNS name to serve at root domain. Empty string = show info page at root */
-    arnsRootHost: string;
+    /**
+     * Content to serve at root domain. Can be ArNS name OR transaction ID.
+     * Auto-detected: 43-char base64url = txId, otherwise = ArNS name.
+     * Empty string = show info page at root.
+     */
+    rootHostContent: string;
+    /**
+     * When true, restricts router to ONLY serve root host content.
+     * Blocks subdomain requests and txId path requests with 404.
+     * Management endpoints (/wayfinder/*) still work.
+     */
+    restrictToRootHost: boolean;
+    /**
+     * Optional GraphQL proxy URL. When set, /graphql proxies to this endpoint.
+     * Empty string = disabled (404 on /graphql).
+     */
+    graphqlProxyUrl: string;
   };
 
   mode: {

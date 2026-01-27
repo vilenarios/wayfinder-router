@@ -42,6 +42,20 @@ function getEnvNumber(key: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+function getEnvWithFallback(
+  primaryKey: string,
+  fallbackKey: string,
+  defaultValue: string,
+): string {
+  if (process.env[primaryKey] !== undefined) {
+    return process.env[primaryKey] ?? defaultValue;
+  }
+  if (process.env[fallbackKey] !== undefined) {
+    return process.env[fallbackKey] ?? defaultValue;
+  }
+  return defaultValue;
+}
+
 function parseUrls(value: string): URL[] {
   return value
     .split(",")
@@ -80,8 +94,19 @@ export function loadConfig(): RouterConfig {
       port: getEnvInt("PORT", 3000),
       host: getEnv("HOST", "0.0.0.0"),
       baseDomain: getEnv("BASE_DOMAIN", "localhost"),
-      // ArNS name to serve at root domain (empty = show info page at root)
-      arnsRootHost: getEnv("ARNS_ROOT_HOST", ""),
+      // Content to serve at root domain - can be ArNS name OR txId (auto-detected)
+      // Backwards compatible: checks ROOT_HOST_CONTENT first, then ARNS_ROOT_HOST
+      rootHostContent: getEnvWithFallback(
+        "ROOT_HOST_CONTENT",
+        "ARNS_ROOT_HOST",
+        "",
+      ),
+      // When true, restricts router to ONLY serve root host content
+      // Blocks: subdomain requests, txId path requests
+      // Allows: root domain paths, /wayfinder/* management endpoints
+      restrictToRootHost: getEnvBool("RESTRICT_TO_ROOT_HOST", false),
+      // GraphQL proxy URL - when set, /graphql proxies to this endpoint
+      graphqlProxyUrl: getEnv("GRAPHQL_PROXY_URL", ""),
     },
 
     mode: {
@@ -483,6 +508,26 @@ export function validateConfig(config: RouterConfig): void {
   ) {
     throw new Error(
       `HTTP_KEEPALIVE_TIMEOUT_MS must be between 10000 (10s) and 300000 (5 min), got ${config.http.keepAliveTimeoutMs}`,
+    );
+  }
+
+  // === ROOT HOST RESTRICTION VALIDATION ===
+
+  // RESTRICT_TO_ROOT_HOST requires ROOT_HOST_CONTENT to be set
+  if (config.server.restrictToRootHost && !config.server.rootHostContent) {
+    throw new Error(
+      "RESTRICT_TO_ROOT_HOST is enabled but ROOT_HOST_CONTENT (or ARNS_ROOT_HOST) is not set. " +
+        "You must configure root host content when using restricted mode.",
+    );
+  }
+
+  // Warn if both old and new env var names are set with different values
+  const rootHostNew = process.env["ROOT_HOST_CONTENT"];
+  const rootHostOld = process.env["ARNS_ROOT_HOST"];
+  if (rootHostNew && rootHostOld && rootHostNew !== rootHostOld) {
+    console.warn(
+      `Warning: Both ROOT_HOST_CONTENT ("${rootHostNew}") and ARNS_ROOT_HOST ("${rootHostOld}") are set. ` +
+        `Using ROOT_HOST_CONTENT value.`,
     );
   }
 }

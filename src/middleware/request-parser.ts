@@ -9,7 +9,7 @@ import { isTxId, normalizePath, isValidSandbox } from "../utils/url.js";
 
 // Reserved paths that should not be treated as transaction IDs or ArNS paths
 // These are always handled by the router itself
-const RESERVED_PATHS = new Set(["favicon.ico"]);
+const RESERVED_PATHS = new Set(["favicon.ico", "graphql"]);
 
 // Reserved path prefixes - paths starting with these are always reserved
 // All router endpoints are under /wayfinder/ (health, ready, metrics, stats, info)
@@ -45,13 +45,15 @@ function isReservedPath(pathname: string): boolean {
  * @param url - The request URL
  * @param hostname - The request hostname
  * @param baseDomain - The base domain for the router
- * @param arnsRootHost - Optional ArNS name to serve at root domain
+ * @param rootHostContent - Optional content (ArNS name or txId) to serve at root domain
+ * @param restrictToRootHost - When true, blocks subdomain and txId path requests
  */
 export function parseRequest(
   url: URL,
   hostname: string,
   baseDomain: string,
-  arnsRootHost?: string,
+  rootHostContent?: string,
+  restrictToRootHost: boolean = false,
 ): RequestInfo {
   // Normalize the base domain (remove port if present in comparison)
   const baseHost = baseDomain.split(":")[0].toLowerCase();
@@ -63,6 +65,14 @@ export function parseRequest(
 
     // Validate it's not empty and doesn't contain additional subdomains
     if (subdomain && !subdomain.includes(".")) {
+      // If restriction mode is enabled, block all subdomain requests
+      if (restrictToRootHost) {
+        return {
+          type: "blocked",
+          reason: "subdomain_restricted",
+          path: url.pathname,
+        };
+      }
       // Check if this is a sandbox subdomain (52 char base32)
       if (isValidSandbox(subdomain)) {
         // Sandbox request - extract txId from path
@@ -118,6 +128,15 @@ export function parseRequest(
 
   // Check if first segment is a valid transaction ID (exactly 43 base64url chars)
   if (firstSegment && isTxId(firstSegment)) {
+    // If restriction mode is enabled, block txId path requests
+    if (restrictToRootHost) {
+      return {
+        type: "blocked",
+        reason: "txid_path_restricted",
+        path: url.pathname,
+      };
+    }
+
     const remainingPath = "/" + pathSegments.slice(1).join("/");
     return {
       type: "txid",
@@ -127,17 +146,27 @@ export function parseRequest(
     };
   }
 
-  // No txId found - check if we should route to arnsRootHost
-  if (arnsRootHost) {
-    // Serve root domain content from the configured ArNS name
-    return {
-      type: "arns",
-      arnsName: arnsRootHost.toLowerCase(),
-      path: normalizePath(url.pathname + url.search),
-    };
+  // No txId found - check if we should route to rootHostContent
+  if (rootHostContent) {
+    // Auto-detect: is it a txId or ArNS name?
+    if (isTxId(rootHostContent)) {
+      // It's a transaction ID - route as txid request
+      return {
+        type: "txid",
+        txId: rootHostContent,
+        path: normalizePath(url.pathname + url.search),
+      };
+    } else {
+      // It's an ArNS name - route as arns request
+      return {
+        type: "arns",
+        arnsName: rootHostContent.toLowerCase(),
+        path: normalizePath(url.pathname + url.search),
+      };
+    }
   }
 
-  // No ArNS root host configured - treat as reserved (will show info page)
+  // No root host content configured - treat as reserved (will show info page)
   return {
     type: "reserved",
     path: url.pathname,
@@ -156,7 +185,8 @@ export function createRequestParserMiddleware(config: RouterConfig) {
       url,
       hostname,
       config.server.baseDomain,
-      config.server.arnsRootHost || undefined,
+      config.server.rootHostContent || undefined,
+      config.server.restrictToRootHost,
     );
 
     // Store parsed info in context for handlers
