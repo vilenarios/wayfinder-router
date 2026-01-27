@@ -17,7 +17,10 @@
     "test:watch": "vitest",
     "stats": "tsx scripts/show-stats.ts",
     "clear:telemetry": "tsx scripts/clear-telemetry.ts",
-    "clear:all": "tsx scripts/clear-all.ts"
+    "clear:all": "tsx scripts/clear-all.ts",
+    "rewards": "tsx src/rewards/cli.ts",
+    "rewards:calculate": "tsx src/rewards/cli.ts calculate",
+    "rewards:list": "tsx src/rewards/cli.ts list"
   },
   "keywords": [
     "arweave",
