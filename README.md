@@ -18,6 +18,8 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 - **Circuit Breaker** - Automatically removes unhealthy gateways from rotation
 - **Telemetry** - SQLite-backed metrics for gateway performance tracking
 - **Gateway Rewards** - Off-chain incentive system to reward gateways for serving traffic
+- **Arweave HTTP API Proxy** - Proxy Arweave node API endpoints (`/info`, `/tx/*`, `/block/*`, etc.)
+- **Content Moderation** - Admin API for blocking ArNS names and transaction IDs
 
 ## Requirements
 
@@ -111,6 +113,54 @@ http://localhost:3000/{txId}?mode=route
 http://localhost:3000/{txId}?mode=proxy
 ```
 
+### Arweave HTTP API Proxy
+
+Proxy Arweave node HTTP API endpoints through the router:
+```bash
+# In .env
+ARWEAVE_API_ENABLED=true
+```
+
+When enabled, requests to standard Arweave endpoints are proxied to Arweave nodes:
+- `/info` - Network info
+- `/tx/{id}` - Transaction details
+- `/tx/{id}/data` - Transaction data
+- `/block/height/{height}` - Block by height
+- `/wallet/{address}/balance` - Wallet balance
+- POST `/tx` - Submit transaction
+
+### Content Moderation
+
+Block ArNS names or transaction IDs from being served:
+```bash
+# In .env
+MODERATION_ENABLED=true
+MODERATION_ADMIN_TOKEN=<your-secure-token>
+```
+
+Admin API (requires Bearer token):
+```bash
+# Block an ArNS name
+curl -X POST http://localhost:3000/wayfinder/moderation/block \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"arns","value":"badcontent","reason":"Policy violation"}'
+
+# Block a transaction ID
+curl -X POST http://localhost:3000/wayfinder/moderation/block \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"txid","value":"abc123...","reason":"DMCA takedown"}'
+
+# List blocked content
+curl http://localhost:3000/wayfinder/moderation/blocklist \
+  -H "Authorization: Bearer <token>"
+
+# Unblock
+curl -X DELETE http://localhost:3000/wayfinder/moderation/block/arns/badcontent \
+  -H "Authorization: Bearer <token>"
+```
+
 ## Configuration
 
 Configuration is managed via environment variables. See [.env.example](.env.example) for all available options and their defaults.
@@ -126,7 +176,11 @@ Router management endpoints are under the `/wayfinder/` prefix:
 | `/wayfinder/metrics` | Prometheus metrics |
 | `/wayfinder/info` | Router info and configuration |
 | `/wayfinder/stats/gateways` | Gateway performance statistics |
+| `/wayfinder/moderation/blocklist` | List blocked content (requires auth) |
+| `/wayfinder/moderation/block` | Block content (requires auth) |
+| `/wayfinder/moderation/check/:type/:value` | Check if content is blocked |
 | `/graphql` | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
+| `/info`, `/tx/*`, `/block/*` | Arweave API (requires `ARWEAVE_API_ENABLED`) |
 
 When `ROOT_HOST_CONTENT` is not set, the root endpoint (`/`) displays router info.
 
