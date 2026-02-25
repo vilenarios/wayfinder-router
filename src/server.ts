@@ -212,6 +212,7 @@ export function createServer(options: CreateServerOptions) {
     enabled: config.cache.contentEnabled,
     maxSizeBytes: config.cache.contentMaxSizeBytes,
     maxItemSizeBytes: config.cache.contentMaxItemSizeBytes,
+    contentPath: config.cache.contentPath,
     ttlMs: 0, // No TTL - Arweave content is immutable
     logger,
   });

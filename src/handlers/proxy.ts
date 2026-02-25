@@ -185,7 +185,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
 
         // Check cache before verifying
         if (contentCache) {
-          const cached = contentCache.get(contentTxId, "");
+          const cached = await contentCache.get(contentTxId, "");
           if (cached) {
             logger.info("Cache hit during retry", {
               contentTxId,
@@ -368,7 +368,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
         try {
           // Try to resolve path using cached manifest
           const pathResolution = await manifestResolver.resolvePath(txId, path);
-          const cachedContent = contentCache.get(
+          const cachedContent = await contentCache.get(
             pathResolution.contentTxId,
             "",
           );
@@ -453,7 +453,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
           headersForCache[key] = value;
         });
 
-        const cached = contentCache.set(result.contentTxId, "", {
+        const cached = await contentCache.set(result.contentTxId, "", {
           data: result.data,
           contentType:
             result.headers.get("content-type") || "application/octet-stream",
@@ -631,7 +631,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
               txId,
               path,
             );
-            const cachedContent = contentCache.get(
+            const cachedContent = await contentCache.get(
               pathResolution.contentTxId,
               "",
             );
@@ -687,7 +687,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
           }
         } else {
           // Direct txId request (no path) - check cache directly
-          const cachedContent = contentCache.get(txId, "");
+          const cachedContent = await contentCache.get(txId, "");
           if (cachedContent) {
             logger.info("Early cache hit - no gateway fetch needed", {
               txId,
@@ -753,7 +753,7 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
           headersForCache[key] = value;
         });
 
-        const cached = contentCache.set(result.contentTxId, "", {
+        const cached = await contentCache.set(result.contentTxId, "", {
           data: result.data,
           contentType:
             result.headers.get("content-type") || "application/octet-stream",

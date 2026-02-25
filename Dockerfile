@@ -36,6 +36,9 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 
+# Pre-create data directories so volume mounts inherit correct ownership
+RUN mkdir -p /app/data/content-cache
+
 # Set ownership
 RUN chown -R wayfinder:nodejs /app
 
@@ -47,7 +50,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD wget --quiet --tries=1 --spider http://localhost:3000/wayfinder/health || exit 1
 
 # Start server
 CMD ["node", "dist/index.js"]

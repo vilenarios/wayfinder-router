@@ -106,11 +106,13 @@ declare module "hono" {
 - `lru-cache` - Content and manifest caching
 - `undici` - HTTP client with connection pooling (`src/http/http-client.ts`)
 
-### TypeScript
+### TypeScript & Code Style
 - Strict mode enabled with `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`
 - All imports must use `.js` extension (ESM requirement, even for `.ts` files)
-- Unused variables prefixed with `_` are allowed (eslint rule: `argsIgnorePattern: '^_'`)
+- Unused variables/args prefixed with `_` are allowed (eslint: `argsIgnorePattern: '^_'`, `varsIgnorePattern: '^_'`)
 - Target ES2022, module NodeNext
+- Prettier: double quotes, semicolons, 80 char width, trailing commas, 2-space indent
+- ESLint: `no-explicit-any` is off, `eqeqeq: smart`, `no-return-await: error`
 
 ### Verification Architecture
 The router separates **routing** (where to fetch data) from **verification** (who to trust for hashes):
