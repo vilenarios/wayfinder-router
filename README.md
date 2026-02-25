@@ -4,40 +4,39 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 
 ## Features
 
-- **Content Verification** - Verifies content integrity via hash checking against trusted gateways
-- **Smart Gateway Selection** - Multiple routing strategies (fastest, random, round-robin, temperature) with health tracking
-- **ArNS Support** - Resolves Arweave Name System names with consensus verification
-- **Manifest Verification** - Verifies path manifests and their content mappings
-- **Root Domain Hosting** - Serve any ArNS name or txId directly at your root domain
-- **Restrict to Root Host Mode** - Lock down router to serve only root domain content
-- **GraphQL Proxy** - Proxy GraphQL requests to an upstream Arweave query endpoint
+- **Content Verification** — Verifies content integrity via hash checking against trusted gateways
+- **Smart Gateway Selection** — Multiple routing strategies (fastest, random, round-robin, temperature) with health tracking and circuit breakers
+- **ArNS Support** — Resolves Arweave Name System names with consensus verification across multiple trusted gateways
+- **Manifest Verification** — Verifies path manifests and their content mappings against trusted sources
+- **Root Domain Hosting** — Serve any ArNS name or txId directly at your root domain
+- **Restrict to Root Host Mode** — Lock down router to serve only root domain content
+- **GraphQL Proxy** — Proxy GraphQL requests to an upstream Arweave query endpoint
 - **Two Operating Modes**:
-  - `proxy` - Fetches, verifies, and serves content
-  - `route` - Redirects clients to gateway URLs
-- **Caching** - In-memory LRU cache for verified content, manifests, and ArNS resolutions
-- **Circuit Breaker** - Automatically removes unhealthy gateways from rotation
-- **Telemetry** - SQLite-backed metrics for gateway performance tracking
-- **Gateway Rewards** - Off-chain incentive system to reward gateways for serving traffic
-- **Arweave HTTP API Proxy** - Proxy Arweave node API endpoints (`/info`, `/tx/*`, `/block/*`, etc.)
-- **Content Moderation** - Admin API for blocking ArNS names and transaction IDs
+  - `proxy` — Fetches, verifies, and serves content through the router
+  - `route` — Redirects clients to gateway URLs (client fetches directly)
+- **Content Cache** — LRU cache for verified content with optional disk-backed persistence for large cache sizes
+- **Arweave HTTP API Proxy** — Proxy Arweave node API endpoints (`/info`, `/tx/*`, `/block/*`, `/wallet/*`, etc.)
+- **Telemetry** — SQLite-backed metrics for gateway performance tracking with configurable sampling
+- **Gateway Rewards** — Off-chain incentive system to reward gateways for serving traffic
+- **Content Moderation** — Admin API for blocking ArNS names and transaction IDs
+- **Rate Limiting** — Per-IP rate limiting with configurable windows and thresholds
+- **Graceful Shutdown** — Drain period for in-flight requests before shutdown, with configurable timeouts
+- **Gateway Ping Service** — Background latency probing for temperature-based routing
 
 ## Requirements
 
-- Node.js (see `engines` in [package.json](package.json))
-
-## Installation
-
-```bash
-npm install
-```
+- Node.js >= 20.0.0
 
 ## Quick Start
 
 ```bash
-# Copy example environment file
+# Install dependencies
+npm install
+
+# Copy example environment file and configure
 cp .env.example .env
 
-# Start development server
+# Start development server with hot reload
 npm run dev
 
 # Or build and run production
@@ -52,15 +51,17 @@ The server starts at `http://localhost:3000` by default.
 ### Root Domain Hosting
 
 Configure `ROOT_HOST_CONTENT` to serve an ArNS name or transaction ID at your root domain:
+
 ```bash
-# In .env - serve an ArNS name
+# In .env — serve an ArNS name (auto-detected by format)
 ROOT_HOST_CONTENT=wayfinder
 
-# Or serve a transaction ID directly
+# Or serve a transaction ID directly (43-char base64url)
 ROOT_HOST_CONTENT=bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U
 ```
 
 With this configuration:
+
 - `https://yourdomain.com/` → Serves the configured content
 - `https://yourdomain.com/docs` → Serves at path `/docs`
 - `https://yourdomain.com/wayfinder/info` → Router info page
@@ -68,13 +69,14 @@ With this configuration:
 ### Restrict to Root Host Only
 
 Lock down the router to serve only root domain content:
+
 ```bash
-# In .env
 ROOT_HOST_CONTENT=wayfinder
 RESTRICT_TO_ROOT_HOST=true
 ```
 
 When enabled:
+
 - Subdomain requests are rejected with 404
 - TxId path requests (e.g., `/{txId}`) are rejected with 404
 - Root domain paths work normally
@@ -83,16 +85,15 @@ When enabled:
 ### GraphQL Proxy
 
 Proxy `/graphql` requests to an upstream GraphQL endpoint:
+
 ```bash
-# In .env
 GRAPHQL_PROXY_URL=https://arweave-search.goldsky.com/graphql
 ```
-
-When configured, clients can query Arweave data via `https://yourdomain.com/graphql`.
 
 ### ArNS Subdomain Requests
 
 Access ArNS names via subdomain:
+
 ```
 http://{arns-name}.localhost:3000/
 ```
@@ -100,6 +101,7 @@ http://{arns-name}.localhost:3000/
 ### Transaction ID Requests
 
 Access content by Arweave transaction ID:
+
 ```
 http://localhost:3000/{txId}
 http://localhost:3000/{txId}/path/to/file
@@ -107,38 +109,74 @@ http://localhost:3000/{txId}/path/to/file
 
 ### Mode Override
 
-Force a specific mode via query parameter:
+Force a specific mode via query parameter (when `ALLOW_MODE_OVERRIDE=true`):
+
 ```
 http://localhost:3000/{txId}?mode=route
 http://localhost:3000/{txId}?mode=proxy
 ```
 
+### Content Cache
+
+Verified Arweave content is cached in an LRU with optional disk-backed persistence. Since Arweave data is immutable, verified content can be cached indefinitely — only LRU eviction bounds storage.
+
+```bash
+# Enable disk-backed cache (recommended for production)
+CONTENT_CACHE_ENABLED=true
+CONTENT_CACHE_PATH=./data/content-cache
+CONTENT_CACHE_MAX_SIZE_BYTES=53687091200   # 50GB
+CONTENT_CACHE_MAX_ITEM_SIZE_BYTES=2147483648  # 2GB
+```
+
+When `CONTENT_CACHE_PATH` is set:
+
+- LRU holds metadata only (low memory footprint)
+- Content bytes stored as files on disk (`<sha256>.bin` + `<sha256>.meta.json`)
+- Cache survives restarts — index restored from disk on startup
+- Atomic writes via temp file + rename for crash safety
+
+When `CONTENT_CACHE_PATH` is empty, the cache operates entirely in-memory.
+
 ### Arweave HTTP API Proxy
 
 Proxy Arweave node HTTP API endpoints through the router:
+
 ```bash
-# In .env
 ARWEAVE_API_ENABLED=true
 ```
 
-When enabled, requests to standard Arweave endpoints are proxied to Arweave nodes:
-- `/info` - Network info
-- `/tx/{id}` - Transaction details
-- `/tx/{id}/data` - Transaction data
-- `/block/height/{height}` - Block by height
-- `/wallet/{address}/balance` - Wallet balance
-- POST `/tx` - Submit transaction
+Supported endpoints:
+
+| Endpoint                  | Description                                      |
+| ------------------------- | ------------------------------------------------ |
+| `/info`                   | Network info (height, version)                   |
+| `/peers`                  | Connected peers list                             |
+| `/tx/{id}`                | Transaction by ID                                |
+| `/tx/{id}/status`         | Transaction confirmation status                  |
+| `/tx/{id}/{field}`        | Transaction field (owner, tags, data_size, etc.) |
+| `/tx/{id}/data`           | Transaction data                                 |
+| `/tx/{id}/data.{ext}`     | Transaction data with content-type hint          |
+| `/tx/{id}/offset`         | Transaction offset                               |
+| `/wallet/{addr}/balance`  | Wallet balance                                   |
+| `/wallet/{addr}/last_tx`  | Wallet's last transaction                        |
+| `/price/{bytes}`          | Price for data upload                            |
+| `/price/{bytes}/{target}` | Price for data upload to target                  |
+| `/block/hash/{hash}`      | Block by hash                                    |
+| `/block/height/{height}`  | Block by height                                  |
+
+Responses are cached with category-aware TTLs: immutable data (transactions, blocks) cached for 24 hours, dynamic data (info, balances) cached for 30 seconds.
 
 ### Content Moderation
 
 Block ArNS names or transaction IDs from being served:
+
 ```bash
-# In .env
 MODERATION_ENABLED=true
 MODERATION_ADMIN_TOKEN=<your-secure-token>
 ```
 
 Admin API (requires Bearer token):
+
 ```bash
 # Block an ArNS name
 curl -X POST http://localhost:3000/wayfinder/moderation/block \
@@ -163,24 +201,143 @@ curl -X DELETE http://localhost:3000/wayfinder/moderation/block/arns/badcontent 
 
 ## Configuration
 
-Configuration is managed via environment variables. See [.env.example](.env.example) for all available options and their defaults.
+All configuration is via environment variables. See [.env.example](.env.example) for the full list with descriptions. Key variables:
+
+### Server
+
+| Variable                | Default     | Description                               |
+| ----------------------- | ----------- | ----------------------------------------- |
+| `PORT`                  | `3000`      | Server port                               |
+| `HOST`                  | `0.0.0.0`   | Bind address                              |
+| `BASE_DOMAIN`           | `localhost` | Base domain for ArNS subdomain routing    |
+| `ROOT_HOST_CONTENT`     | _(empty)_   | ArNS name or txId to serve at root domain |
+| `RESTRICT_TO_ROOT_HOST` | `false`     | Only serve root domain content            |
+| `GRAPHQL_PROXY_URL`     | _(empty)_   | Upstream GraphQL endpoint                 |
+
+### Mode
+
+| Variable              | Default | Description                        |
+| --------------------- | ------- | ---------------------------------- |
+| `DEFAULT_MODE`        | `proxy` | Operating mode: `proxy` or `route` |
+| `ALLOW_MODE_OVERRIDE` | `true`  | Allow `?mode=` query parameter     |
+
+### Verification
+
+| Variable                       | Default              | Description                                           |
+| ------------------------------ | -------------------- | ----------------------------------------------------- |
+| `VERIFICATION_ENABLED`         | `true`               | Enable content hash verification                      |
+| `VERIFICATION_GATEWAY_SOURCE`  | `top-staked`         | Source for trusted gateways: `top-staked` or `static` |
+| `VERIFICATION_GATEWAY_COUNT`   | `3`                  | Number of top-staked gateways for verification        |
+| `VERIFICATION_STATIC_GATEWAYS` | _(see .env.example)_ | Comma-separated gateway URLs                          |
+| `ARNS_CONSENSUS_THRESHOLD`     | `2`                  | Minimum gateways that must agree on ArNS resolution   |
+| `VERIFICATION_RETRY_ATTEMPTS`  | `3`                  | Gateways to try before failing                        |
+
+### Routing
+
+| Variable                  | Default                     | Description                                                  |
+| ------------------------- | --------------------------- | ------------------------------------------------------------ |
+| `ROUTING_STRATEGY`        | `fastest`                   | Strategy: `fastest`, `random`, `round-robin`, `temperature`  |
+| `ROUTING_GATEWAY_SOURCE`  | `network`                   | Source: `network`, `trusted-peers`, `static`, `trusted-ario` |
+| `ROUTING_STATIC_GATEWAYS` | _(see .env.example)_        | Comma-separated gateway URLs                                 |
+| `TRUSTED_PEER_GATEWAY`    | `https://turbo-gateway.com` | Gateway for peer list (when source=`trusted-peers`)          |
+| `TRUSTED_ARIO_GATEWAYS`   | _(empty)_                   | Trusted gateways (when source=`trusted-ario`)                |
+
+### Cache
+
+| Variable                            | Default              | Description                                        |
+| ----------------------------------- | -------------------- | -------------------------------------------------- |
+| `CONTENT_CACHE_ENABLED`             | `true`               | Enable verified content cache                      |
+| `CONTENT_CACHE_MAX_SIZE_BYTES`      | `53687091200` (50GB) | Maximum cache size                                 |
+| `CONTENT_CACHE_MAX_ITEM_SIZE_BYTES` | `2147483648` (2GB)   | Maximum single item size                           |
+| `CONTENT_CACHE_PATH`                | _(empty)_            | Disk path for persistence (empty = in-memory only) |
+| `ARNS_CACHE_TTL_MS`                 | `300000` (5min)      | ArNS resolution cache TTL                          |
+
+### Resilience
+
+| Variable                    | Default         | Description                           |
+| --------------------------- | --------------- | ------------------------------------- |
+| `RETRY_ATTEMPTS`            | `3`             | Retry attempts for failed requests    |
+| `RETRY_DELAY_MS`            | `100`           | Delay between retries                 |
+| `CIRCUIT_BREAKER_THRESHOLD` | `3`             | Failures before opening circuit       |
+| `CIRCUIT_BREAKER_RESET_MS`  | `60000` (1min)  | Time before retrying a broken gateway |
+| `GATEWAY_HEALTH_TTL_MS`     | `300000` (5min) | Health status cache TTL               |
+| `STREAM_TIMEOUT_MS`         | `120000` (2min) | Per-chunk stream read timeout         |
+
+### Telemetry
+
+| Variable                   | Default               | Description                           |
+| -------------------------- | --------------------- | ------------------------------------- |
+| `TELEMETRY_ENABLED`        | `true`                | Enable telemetry collection           |
+| `TELEMETRY_ROUTER_ID`      | `router-{timestamp}`  | Instance identifier                   |
+| `TELEMETRY_DB_PATH`        | `./data/telemetry.db` | SQLite database path                  |
+| `TELEMETRY_RETENTION_DAYS` | `30`                  | Data retention period                 |
+| `TELEMETRY_SAMPLE_SUCCESS` | `0.1`                 | Sampling rate for successful requests |
+| `TELEMETRY_SAMPLE_ERRORS`  | `1.0`                 | Sampling rate for errors              |
+
+### Rate Limiting
+
+| Variable                  | Default        | Description                    |
+| ------------------------- | -------------- | ------------------------------ |
+| `RATE_LIMIT_ENABLED`      | `false`        | Enable per-IP rate limiting    |
+| `RATE_LIMIT_WINDOW_MS`    | `60000` (1min) | Rate limit window              |
+| `RATE_LIMIT_MAX_REQUESTS` | `1000`         | Max requests per IP per window |
+
+### Moderation
+
+| Variable                    | Default                 | Description                                 |
+| --------------------------- | ----------------------- | ------------------------------------------- |
+| `MODERATION_ENABLED`        | `false`                 | Enable content moderation                   |
+| `MODERATION_BLOCKLIST_PATH` | `./data/blocklist.json` | Blocklist file (auto-created, hot-reloaded) |
+| `MODERATION_ADMIN_TOKEN`    | _(empty)_               | Bearer token for admin endpoints            |
+
+### Arweave HTTP API
+
+| Variable                    | Default                      | Description              |
+| --------------------------- | ---------------------------- | ------------------------ |
+| `ARWEAVE_API_ENABLED`       | `false`                      | Enable Arweave API proxy |
+| `ARWEAVE_READ_NODES`        | _(Arweave tip nodes)_        | Nodes for GET requests   |
+| `ARWEAVE_WRITE_NODES`       | _(falls back to read nodes)_ | Nodes for POST requests  |
+| `ARWEAVE_API_CACHE_ENABLED` | `true`                       | Cache API responses      |
+
+### Shutdown
+
+| Variable                    | Default       | Description                         |
+| --------------------------- | ------------- | ----------------------------------- |
+| `SHUTDOWN_DRAIN_TIMEOUT_MS` | `15000` (15s) | Grace period for in-flight requests |
+| `SHUTDOWN_TIMEOUT_MS`       | `30000` (30s) | Total shutdown timeout              |
 
 ## API Endpoints
 
 Router management endpoints are under the `/wayfinder/` prefix:
 
-| Endpoint | Description |
-|----------|-------------|
-| `/wayfinder/health` | Health check |
-| `/wayfinder/ready` | Readiness check |
-| `/wayfinder/metrics` | Prometheus metrics |
-| `/wayfinder/info` | Router info and configuration |
-| `/wayfinder/stats/gateways` | Gateway performance statistics |
-| `/wayfinder/moderation/blocklist` | List blocked content (requires auth) |
-| `/wayfinder/moderation/block` | Block content (requires auth) |
-| `/wayfinder/moderation/check/:type/:value` | Check if content is blocked |
-| `/graphql` | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
-| `/info`, `/tx/*`, `/block/*` | Arweave API (requires `ARWEAVE_API_ENABLED`) |
+| Endpoint                                 | Description                           |
+| ---------------------------------------- | ------------------------------------- |
+| `GET /wayfinder/health`                  | Health check                          |
+| `GET /wayfinder/ready`                   | Readiness check                       |
+| `GET /wayfinder/metrics`                 | Prometheus metrics                    |
+| `GET /wayfinder/info`                    | Router info and configuration         |
+| `GET /wayfinder/stats/gateways`          | Gateway performance statistics        |
+| `GET /wayfinder/stats/gateways/list`     | List all tracked gateways             |
+| `GET /wayfinder/stats/gateways/:gateway` | Detailed stats for a specific gateway |
+| `GET /wayfinder/stats/export`            | Export telemetry data                 |
+
+Moderation endpoints (when `MODERATION_ENABLED=true`):
+
+| Endpoint                                          | Auth | Description                 |
+| ------------------------------------------------- | ---- | --------------------------- |
+| `GET /wayfinder/moderation/check/:type/:value`    | No   | Check if content is blocked |
+| `GET /wayfinder/moderation/blocklist`             | Yes  | List all blocked content    |
+| `GET /wayfinder/moderation/stats`                 | Yes  | Moderation statistics       |
+| `POST /wayfinder/moderation/block`                | Yes  | Block content               |
+| `POST /wayfinder/moderation/reload`               | Yes  | Reload blocklist from disk  |
+| `DELETE /wayfinder/moderation/block/:type/:value` | Yes  | Unblock content             |
+
+Other endpoints:
+
+| Endpoint                                                        | Description                                  |
+| --------------------------------------------------------------- | -------------------------------------------- |
+| `ALL /graphql`                                                  | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
+| `/info`, `/tx/*`, `/block/*`, `/wallet/*`, `/price/*`, `/peers` | Arweave API (requires `ARWEAVE_API_ENABLED`) |
 
 When `ROOT_HOST_CONTENT` is not set, the root endpoint (`/`) displays router info.
 
@@ -191,10 +348,11 @@ The rewards system distributes ARIO tokens to gateways based on their performanc
 ### Reward Calculation
 
 Gateways are scored on four weighted factors:
-- **Volume (40%)** - Number of requests served
-- **Reliability (25%)** - Success rate
-- **Speed (20%)** - P95 latency
-- **Bandwidth (15%)** - Bytes served
+
+- **Volume (40%)** — Number of requests served
+- **Reliability (25%)** — Success rate
+- **Speed (20%)** — P95 latency
+- **Bandwidth (15%)** — Bytes served
 
 Verification gateways receive a 15% bonus. Rewards are split between operators and delegates according to gateway delegation settings.
 
@@ -205,7 +363,7 @@ Verification gateways receive a 15% bonus. Rewards are split between operators a
 npm run rewards:calculate
 
 # Calculate for a specific date
-npm run rewards calculate --date 2026-01-25
+npm run rewards calculate -- --date 2026-01-25
 
 # List all reward periods
 npm run rewards:list
@@ -219,41 +377,78 @@ npm run rewards fraud-check <periodId>
 # Approve for distribution (after review)
 npm run rewards approve <periodId>
 
+# Reject a period
+npm run rewards reject <periodId> -- --reason "reason text"
+
 # Execute distribution (dry-run first!)
-npm run rewards distribute <periodId> --dry-run
+npm run rewards distribute <periodId> -- --dry-run
 npm run rewards distribute <periodId>
 ```
 
-### Configuration
+### Reward Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REWARDS_DATA_DIR` | `./data/rewards` | Directory for reward period data |
-| `TELEMETRY_DB_PATH` | `./data/telemetry.db` | Path to telemetry database |
-| `INSTANCE_ID` | `wayfinder-main` | Identifier for this instance |
+| Variable            | Default               | Description                      |
+| ------------------- | --------------------- | -------------------------------- |
+| `REWARDS_DATA_DIR`  | `./data/rewards`      | Directory for reward period data |
+| `TELEMETRY_DB_PATH` | `./data/telemetry.db` | Path to telemetry database       |
+| `INSTANCE_ID`       | `wayfinder-main`      | Identifier for this instance     |
 
-See [CLAUDE.md](CLAUDE.md) for detailed documentation.
+See [docs/GATEWAY_REWARDS.md](docs/GATEWAY_REWARDS.md) for full documentation.
 
 ## Docker
 
-```bash
-# Development
-docker compose up
+### Production
 
-# Production
+```bash
+# Build and run with docker compose (maps to host port 3020)
+docker compose up wayfinder-router
+
+# Or build and run manually
 docker build -t wayfinder-router .
-docker run -p 3000:3000 --env-file .env wayfinder-router
+docker run -p 3000:3000 --env-file .env -v ./data:/app/data wayfinder-router
+```
+
+The production container runs as a non-root user with resource limits (2 CPUs, 512MB memory). The `./data` volume persists telemetry, content cache, and blocklist data.
+
+### Development
+
+```bash
+# Start dev service with hot reload (requires Dockerfile.dev)
+docker compose --profile dev up wayfinder-router-dev
 ```
 
 ## Development
 
 ```bash
-npm run dev          # Start with hot reload
+# Core
+npm run dev          # Start with hot reload (tsx watch)
 npm run build        # Compile TypeScript
 npm run typecheck    # Type check without emitting
 npm run test         # Run tests
 npm run test:watch   # Run tests in watch mode
+
+# Code quality
+npm run lint         # Run ESLint
+npm run lint:fix     # Auto-fix ESLint issues
+npm run format       # Format with Prettier
+npm run format:check # Check formatting
+
+# Utilities
+npm run stats        # Show gateway telemetry statistics
+npm run clear:telemetry  # Clear telemetry database
+npm run clear:all    # Clear all data (telemetry + cache)
 ```
+
+## Documentation
+
+Additional documentation is available in the [docs/](docs/) directory:
+
+- [Product Specification](docs/PRODUCT_SPEC.md) — Full product spec and design goals
+- [Enterprise Architecture](docs/ENTERPRISE_ARCHITECTURE.md) — Architecture overview and component design
+- [Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md) — Production deployment guide
+- [Deployment Diagram](docs/DEPLOYMENT_DIAGRAM.md) — Infrastructure topology
+- [Gateway Rewards](docs/GATEWAY_REWARDS.md) — Rewards system documentation
+- [Economic Model](docs/ECONOMIC_MODEL.md) — Token economics and incentive design
 
 ## License
 
