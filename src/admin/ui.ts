@@ -663,7 +663,7 @@ function css(): string {
 
 function clientJs(): string {
   return `
-    const BASE = '/wayfinder/admin/api';
+    const BASE = '/api';
     let authToken = localStorage.getItem('wayfinder_admin_token') || '';
     let currentPage = 'status';
     let statusInterval = null;
