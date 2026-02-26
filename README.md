@@ -17,7 +17,7 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 - **Content Cache** — LRU cache for verified content with optional disk-backed persistence for large cache sizes
 - **Arweave HTTP API Proxy** — Proxy Arweave node API endpoints (`/info`, `/tx/*`, `/block/*`, `/wallet/*`, etc.)
 - **Telemetry** — SQLite-backed metrics for gateway performance tracking with configurable sampling
-- **Gateway Rewards** — Off-chain incentive system to reward gateways for serving traffic
+- **Gateway Rewards** (Experimental) — Off-chain incentive system to reward gateways for serving traffic
 - **Admin UI** — Built-in web admin dashboard on a separate port with setup wizard, status monitoring, gateway health, telemetry, moderation, and settings
 - **Content Moderation** — Admin API for blocking ArNS names and transaction IDs
 - **Rate Limiting** — Per-IP rate limiting with configurable windows and thresholds
@@ -33,7 +33,7 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 
 ### Option 1: Standalone Binary (easiest)
 
-Download the latest binary for your platform from [GitHub Releases](../../releases):
+Download the latest binary for your platform from [GitHub Releases](https://github.com/ar-io/wayfinder-router/releases):
 
 | Platform | Binary |
 |----------|--------|
@@ -43,11 +43,17 @@ Download the latest binary for your platform from [GitHub Releases](../../releas
 | macOS Apple Silicon | `wayfinder-router-darwin-arm64` |
 | Windows x64 | `wayfinder-router-windows-x64.exe` |
 
+Each release also includes a `checksums.txt` with SHA256 hashes for verification.
+
 Then run it:
 
 ```bash
 # Make executable (Linux/macOS)
 chmod +x wayfinder-router-linux-x64
+
+# Verify checksum (optional but recommended)
+sha256sum wayfinder-router-linux-x64
+# Compare with checksums.txt from the release
 
 # Run — the admin UI opens at http://localhost:3001 with a setup wizard
 ./wayfinder-router-linux-x64
@@ -462,9 +468,11 @@ Admin UI endpoints (admin port, default 3001):
 
 When `ROOT_HOST_CONTENT` is not set, the root endpoint (`/`) displays router info.
 
-## Gateway Rewards
+## Gateway Rewards (Experimental)
 
-The rewards system distributes ARIO tokens to gateways based on their performance serving traffic through Wayfinder Router.
+> **Note:** The rewards system is experimental and uses mock services for token transfers and delegation lookups. It is not automatically run by the router — all commands must be invoked manually via the CLI. See [docs/GATEWAY_REWARDS.md](docs/GATEWAY_REWARDS.md) for the full design.
+
+The rewards system is designed to distribute ARIO tokens to gateways based on their performance serving traffic through Wayfinder Router.
 
 ### Reward Calculation
 
@@ -526,7 +534,7 @@ docker compose up wayfinder-router
 
 # Or build and run manually
 docker build -t wayfinder-router .
-docker run -p 3000:3000 --env-file .env -v ./data:/app/data wayfinder-router
+docker run -p 3000:3000 -p 3001:3001 --env-file .env -v ./data:/app/data wayfinder-router
 ```
 
 The production container runs as a non-root user with resource limits (2 CPUs, 512MB memory). The `./data` volume persists telemetry, content cache, and blocklist data.

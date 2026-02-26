@@ -5,6 +5,7 @@
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
 import { logger as honoLogger } from "hono/logger";
 import packageJson from "../package.json" with { type: "json" };
 
@@ -365,6 +366,9 @@ export function createServer(options: CreateServerOptions) {
   const app = new Hono();
 
   // Global middleware
+  app.use("*", secureHeaders());
+  // CORS: Allow all origins — intentional for a content proxy.
+  // Browsers must be able to fetch Arweave content from any origin.
   app.use("*", cors());
 
   // Request tracking for graceful shutdown (applied very early)

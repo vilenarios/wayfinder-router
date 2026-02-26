@@ -61,7 +61,12 @@ export function createGatewayDetailHandler(deps: StatsHandlerDeps) {
     }
 
     try {
-      const gateway = decodeURIComponent(c.req.param("gateway"));
+      let gateway: string;
+      try {
+        gateway = decodeURIComponent(c.req.param("gateway"));
+      } catch {
+        return c.json({ error: "Invalid gateway parameter encoding" }, 400);
+      }
       const startHour = c.req.query("start");
       const endHour = c.req.query("end");
 

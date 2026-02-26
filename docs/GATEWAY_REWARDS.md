@@ -108,43 +108,43 @@ Rewards are distributed according to each gateway's delegation settings:
 
 ```bash
 # Calculate yesterday's rewards (most common)
-npm run rewards:calculate
+bun run rewards:calculate
 
 # Calculate for a specific date
-npm run rewards calculate --date 2026-01-25
+bun run rewards calculate --date 2026-01-25
 
 # Use custom configuration
-npm run rewards calculate --config ./my-config.json
+bun run rewards calculate --config ./my-config.json
 ```
 
 ### Review & Approve
 
 ```bash
 # List all periods
-npm run rewards:list
-npm run rewards list --status pending_review
+bun run rewards:list
+bun run rewards list --status pending_review
 
 # Preview distribution (see operator/delegate splits)
-npm run rewards preview 2026-01-25_2026-01-26
+bun run rewards preview 2026-01-25_2026-01-26
 
 # Run fraud detection
-npm run rewards fraud-check 2026-01-25_2026-01-26
+bun run rewards fraud-check 2026-01-25_2026-01-26
 
 # Approve for distribution
-npm run rewards approve 2026-01-25_2026-01-26
+bun run rewards approve 2026-01-25_2026-01-26
 
 # Or reject
-npm run rewards reject 2026-01-25_2026-01-26 --reason "Suspected gaming detected"
+bun run rewards reject 2026-01-25_2026-01-26 --reason "Suspected gaming detected"
 ```
 
 ### Distribute
 
 ```bash
 # Dry run (see what would happen)
-npm run rewards distribute 2026-01-25_2026-01-26 --dry-run
+bun run rewards distribute 2026-01-25_2026-01-26 --dry-run
 
 # Execute distribution
-npm run rewards distribute 2026-01-25_2026-01-26
+bun run rewards distribute 2026-01-25_2026-01-26
 ```
 
 ## Configuration

@@ -14,6 +14,7 @@
  */
 
 import { Database } from "bun:sqlite";
+
 import {
   createRewardCalculator,
   type TelemetrySource,
@@ -499,7 +500,6 @@ function createMockTelemetrySource(): TelemetrySource {
 function createMockGatewayRegistry(): GatewayRegistry {
   return {
     async getOperatorAddress(fqdn: string): Promise<string | undefined> {
-      // In production, query ar.io network for gateway operator
       return `operator-${fqdn}`;
     },
     async getGatewayInfo(fqdn: string) {

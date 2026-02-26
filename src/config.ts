@@ -2,6 +2,7 @@
  * Configuration management for Wayfinder Router
  */
 
+import { resolve } from "node:path";
 import type {
   RouterConfig,
   RouterMode,
@@ -61,7 +62,15 @@ function parseUrls(value: string): URL[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0)
-    .map((s) => new URL(s));
+    .map((s) => {
+      const url = new URL(s);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error(
+          `Invalid URL scheme "${url.protocol}" in "${s}". Only http: and https: are allowed.`,
+        );
+      }
+      return url;
+    });
 }
 
 export function loadConfig(): RouterConfig {
@@ -217,13 +226,15 @@ export function loadConfig(): RouterConfig {
       },
       storage: {
         type: "sqlite" as const,
-        path: getEnv("TELEMETRY_DB_PATH", "./data/telemetry.db"),
+        path: resolve(getEnv("TELEMETRY_DB_PATH", "./data/telemetry.db")),
         retentionDays: getEnvInt("TELEMETRY_RETENTION_DAYS", 30),
       },
       export: {
         enabled: getEnvBool("TELEMETRY_EXPORT_ENABLED", false),
         intervalHours: getEnvInt("TELEMETRY_EXPORT_INTERVAL_HOURS", 24),
-        path: getEnv("TELEMETRY_EXPORT_PATH", "./data/telemetry-export.json"),
+        path: resolve(
+          getEnv("TELEMETRY_EXPORT_PATH", "./data/telemetry-export.json"),
+        ),
       },
     },
 
