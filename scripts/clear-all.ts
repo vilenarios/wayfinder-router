@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env bun
 /**
  * Clear All Data
  *
@@ -10,7 +10,7 @@
  * are cleared automatically when the server restarts.
  *
  * Usage:
- *   npx tsx scripts/clear-all.ts [options]
+ *   bun scripts/clear-all.ts [options]
  *
  * Options:
  *   --dry-run         Preview what would be deleted without making changes
@@ -22,7 +22,7 @@
 
 import { existsSync, statSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import * as readline from "node:readline";
 
 interface Options {
@@ -91,7 +91,7 @@ Note: In-memory caches (ArNS, manifests, gateway health, temperature)
 are cleared automatically when the server restarts.
 
 Usage:
-  npx tsx scripts/clear-all.ts [options]
+  bun scripts/clear-all.ts [options]
 
 Options:
   --dry-run         Preview what would be deleted without making changes
@@ -105,9 +105,9 @@ Environment Variables:
   CONTENT_CACHE_PATH    Path to content cache directory (default: empty = in-memory only)
 
 Examples:
-  npx tsx scripts/clear-all.ts --dry-run
-  npx tsx scripts/clear-all.ts --yes
-  npx tsx scripts/clear-all.ts --telemetry-only
+  bun scripts/clear-all.ts --dry-run
+  bun scripts/clear-all.ts --yes
+  bun scripts/clear-all.ts --telemetry-only
 `);
 }
 
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
       const db = new Database(action.path);
       db.prepare("DELETE FROM gateway_hourly_stats").run();
       db.prepare("DELETE FROM gateway_events").run();
-      db.exec("VACUUM");
+      db.run("VACUUM");
       db.close();
       console.log(`  Cleared and vacuumed: ${action.path}`);
     } else if (action.type === "Content Cache") {

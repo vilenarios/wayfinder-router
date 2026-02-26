@@ -6,6 +6,9 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger as honoLogger } from "hono/logger";
+import packageJson from "../package.json" with { type: "json" };
+
+const ROUTER_VERSION: string = packageJson.version;
 
 import type {
   RouterConfig,
@@ -224,7 +227,7 @@ export function createServer(options: CreateServerOptions) {
       config: config.telemetry,
       logger,
       routerId: config.telemetry.routerId,
-      routerVersion: process.env.npm_package_version || "0.1.0",
+      routerVersion: ROUTER_VERSION,
       baseDomain: config.server.baseDomain,
     });
     logger.info("Telemetry service initialized", {
@@ -389,6 +392,7 @@ export function createServer(options: CreateServerOptions) {
     config,
     logger,
     startTime,
+    version: ROUTER_VERSION,
   };
 
   // All router endpoints are under /wayfinder/ prefix
@@ -573,7 +577,7 @@ export function createServer(options: CreateServerOptions) {
       ) {
         return c.json({
           name: "Wayfinder Router",
-          version: process.env.npm_package_version || "0.1.0",
+          version: ROUTER_VERSION,
           description: "Lightweight proxy router for ar.io network gateways",
           endpoints: {
             arns: config.server.restrictToRootHost
@@ -604,7 +608,7 @@ export function createServer(options: CreateServerOptions) {
       ) {
         return c.json({
           name: "Wayfinder Router",
-          version: process.env.npm_package_version || "0.1.0",
+          version: ROUTER_VERSION,
           description: "Lightweight proxy router for ar.io network gateways",
           endpoints: {
             arns: config.server.restrictToRootHost
@@ -751,5 +755,5 @@ export function createServer(options: CreateServerOptions) {
     rateLimitEnabled: config.rateLimit.enabled,
   });
 
-  return { app, services };
+  return { app, services, startTime };
 }

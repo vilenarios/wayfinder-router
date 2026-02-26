@@ -16,37 +16,40 @@ Wayfinder Router is a lightweight proxy router for the ar.io network. It acts as
 
 ## Requirements
 
-- Node.js >= 20.0.0
+- [Bun](https://bun.sh) >= 1.0.0
 - ESM module system (`"type": "module"` in package.json)
 
 ## Common Commands
 
 ```bash
-npm run dev          # Start development server with hot reload (tsx watch)
-npm run build        # Compile TypeScript to dist/
-npm run start        # Run compiled server from dist/
-npm run typecheck    # Type-check without emitting
-npm run test         # Run tests once with vitest
-npm run test:watch   # Run tests in watch mode
-npx vitest run src/path/to/file.test.ts  # Run a single test file
+bun run dev          # Start development server with hot reload (bun --watch)
+bun run start        # Run production (bun src/index.ts)
+bun run typecheck    # Type-check without emitting
+bun run test         # Run tests once with vitest
+bun run test:watch   # Run tests in watch mode
+bunx vitest run src/path/to/file.test.ts  # Run a single test file
 
 # Linting and formatting
-npm run lint         # Run ESLint on src/
-npm run lint:fix     # Auto-fix ESLint issues
-npm run format       # Format code with Prettier
-npm run format:check # Check formatting without changes
+bun run lint         # Run ESLint on src/
+bun run lint:fix     # Auto-fix ESLint issues
+bun run format       # Format code with Prettier
+bun run format:check # Check formatting without changes
+
+# Build
+bun run build            # Compile TypeScript (tsc)
+bun run build:binaries   # Cross-compile standalone binaries for all platforms
 
 # CLI utilities
-npm run stats        # Show gateway telemetry statistics
-npm run clear:telemetry  # Clear telemetry database
-npm run clear:all    # Clear all data (telemetry + cache)
+bun run stats        # Show gateway telemetry statistics
+bun run clear:telemetry  # Clear telemetry database
+bun run clear:all    # Clear all data (telemetry + cache)
 
 # Gateway rewards
-npm run rewards:calculate  # Calculate yesterday's rewards
-npm run rewards:list       # List all reward periods
-npm run rewards preview <periodId>     # Preview distribution
-npm run rewards approve <periodId>     # Approve for distribution
-npm run rewards distribute <periodId>  # Execute distribution
+bun run rewards:calculate  # Calculate yesterday's rewards
+bun run rewards:list       # List all reward periods
+bun run rewards preview <periodId>     # Preview distribution
+bun run rewards approve <periodId>     # Approve for distribution
+bun run rewards distribute <periodId>  # Execute distribution
 ```
 
 ### Docker
@@ -54,7 +57,7 @@ npm run rewards distribute <periodId>  # Execute distribution
 ```bash
 docker compose up                    # Development
 docker build -t wayfinder-router .   # Build production image
-docker run -p 3000:3000 --env-file .env wayfinder-router  # Run production
+docker run -p 3000:3000 -p 3001:3001 --env-file .env wayfinder-router  # Run production
 ```
 
 ## Architecture
@@ -95,16 +98,16 @@ declare module "hono" {
 }
 ```
 
-**Dependency Injection**: `createServer()` in `src/server.ts` wires all services together and returns `{ app, services }`.
+**Dependency Injection**: `createServer()` in `src/server.ts` wires all services together and returns `{ app, services, startTime }`.
 
 ### Key Dependencies
 - `@ar.io/wayfinder-core` - SDK for routing strategies, gateway providers, verification
 - `@ar.io/sdk` - ar.io network SDK (ARIO class for fetching gateway registry)
-- `hono` - Web framework with `@hono/node-server`
-- `better-sqlite3` - Telemetry storage
+- `hono` - Web framework (uses `Bun.serve()` directly, no adapter needed)
+- `bun:sqlite` - Telemetry storage (built-in, no npm package)
 - `pino` / `pino-pretty` - Logging
 - `lru-cache` - Content and manifest caching
-- `undici` - HTTP client with connection pooling (`src/http/http-client.ts`)
+- Native `fetch` - HTTP client (`src/http/http-client.ts`, uses `globalThis.fetch` with `AbortSignal.timeout()`)
 
 ### TypeScript & Code Style
 - Strict mode enabled with `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`
@@ -150,12 +153,22 @@ The router can proxy Arweave node HTTP API requests (`/info`, `/tx/{id}`, `/bloc
 
 Supported endpoints: `/info`, `/peers`, `/tx/{id}`, `/tx/{id}/status`, `/tx/{id}/{field}`, `/tx/{id}/data`, `/wallet/{addr}/balance`, `/wallet/{addr}/last_tx`, `/price/{bytes}`, `/block/hash/{hash}`, `/block/height/{height}`
 
+### Admin UI Architecture
+The admin UI (`src/admin/`) is a built-in web dashboard that runs on a **separate port** (default 3001) from the public router (default 3000). This isolates admin endpoints from public traffic.
+
+- **`src/admin/server.ts`** - Creates a separate Hono app for the admin UI with optional Bearer token auth
+- **`src/admin/handler.ts`** - Route handlers: serves SPA HTML and JSON API endpoints (`/api/status`, `/api/gateways`, `/api/telemetry`, `/api/config`, `/api/moderation`, `/api/config/save`)
+- **`src/admin/ui.ts`** - Single-file embedded SPA (HTML + CSS + JS as template literals). No React, no build step — ships inside the binary
+- **`src/admin/types.ts`** - `AdminDeps` interface
+
+The admin server is started as a separate `Bun.serve()` in `src/index.ts`. Security: binds to `127.0.0.1` by default (localhost only). When `ADMIN_HOST=0.0.0.0`, `ADMIN_TOKEN` is required.
+
 ### Graceful Shutdown
 The `ShutdownManager` (`src/utils/shutdown-manager.ts`) handles SIGTERM/SIGINT with a drain period for in-flight requests before force exit. Configuration via `SHUTDOWN_DRAIN_TIMEOUT_MS` and `SHUTDOWN_TIMEOUT_MS`.
 
 ## API Endpoints
 
-Router management endpoints are under the `/wayfinder/` prefix:
+Router management endpoints (public port) are under the `/wayfinder/` prefix:
 
 | Endpoint | Description |
 |----------|-------------|
@@ -165,6 +178,18 @@ Router management endpoints are under the `/wayfinder/` prefix:
 | `/wayfinder/info` | Router info and configuration |
 | `/wayfinder/stats/gateways` | Gateway performance statistics |
 | `/graphql` | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
+
+Admin UI endpoints (admin port, default 3001):
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | Admin UI SPA |
+| `GET /api/status` | Aggregated status data |
+| `GET /api/gateways` | Gateway list with health/scores |
+| `GET /api/telemetry` | Time-ranged telemetry stats |
+| `GET /api/config` | Current config (sanitized) |
+| `GET /api/moderation` | Moderation status and blocklist |
+| `POST /api/config/save` | Save .env file |
 
 Arweave HTTP API endpoints (when `ARWEAVE_API_ENABLED=true`):
 
@@ -186,6 +211,7 @@ Content is served at:
 All configuration via environment variables. See `.env.example` for full list. Key variables:
 
 **Server**: `PORT`, `HOST`, `BASE_DOMAIN`, `ROOT_HOST_CONTENT`, `RESTRICT_TO_ROOT_HOST`, `GRAPHQL_PROXY_URL`
+**Admin UI**: `ADMIN_UI_ENABLED`, `ADMIN_PORT`, `ADMIN_HOST`, `ADMIN_TOKEN`
 **Mode**: `DEFAULT_MODE` (`proxy`/`route`), `ALLOW_MODE_OVERRIDE`
 **Verification**: `VERIFICATION_ENABLED`, `VERIFICATION_GATEWAY_SOURCE`, `VERIFICATION_GATEWAY_COUNT`
 **Routing**: `ROUTING_STRATEGY`, `ROUTING_GATEWAY_SOURCE`, `ROUTING_STATIC_GATEWAYS`

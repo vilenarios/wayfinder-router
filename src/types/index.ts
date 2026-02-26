@@ -284,6 +284,18 @@ export interface RouterConfig {
     /** Admin API token for authentication */
     adminToken: string;
   };
+
+  // Admin UI settings
+  admin: {
+    /** Enable admin UI server */
+    enabled: boolean;
+    /** Admin server port (separate from public port) */
+    port: number;
+    /** Admin server host (default: 127.0.0.1 — localhost only) */
+    host: string;
+    /** Token for admin UI authentication (required when host is not localhost) */
+    token: string;
+  };
 }
 
 // Gateway health tracking

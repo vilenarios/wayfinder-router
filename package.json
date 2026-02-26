@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "description": "Lightweight proxy router for ar.io network gateways with verification",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "bun --watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "lint:fix": "eslint --fix src",
@@ -15,12 +15,13 @@
     "format:check": "prettier --check src",
     "test": "vitest run",
     "test:watch": "vitest",
-    "stats": "tsx scripts/show-stats.ts",
-    "clear:telemetry": "tsx scripts/clear-telemetry.ts",
-    "clear:all": "tsx scripts/clear-all.ts",
-    "rewards": "tsx src/rewards/cli.ts",
-    "rewards:calculate": "tsx src/rewards/cli.ts calculate",
-    "rewards:list": "tsx src/rewards/cli.ts list"
+    "stats": "bun scripts/show-stats.ts",
+    "clear:telemetry": "bun scripts/clear-telemetry.ts",
+    "clear:all": "bun scripts/clear-all.ts",
+    "rewards": "bun src/rewards/cli.ts",
+    "rewards:calculate": "bun src/rewards/cli.ts calculate",
+    "rewards:list": "bun src/rewards/cli.ts list",
+    "build:binaries": "bun build --compile --target=bun-linux-x64 src/index.ts --outfile ./builds/wayfinder-router-linux-x64 && bun build --compile --target=bun-linux-arm64 src/index.ts --outfile ./builds/wayfinder-router-linux-arm64 && bun build --compile --target=bun-darwin-x64 src/index.ts --outfile ./builds/wayfinder-router-darwin-x64 && bun build --compile --target=bun-darwin-arm64 src/index.ts --outfile ./builds/wayfinder-router-darwin-arm64 && bun build --compile --target=bun-windows-x64 src/index.ts --outfile ./builds/wayfinder-router-windows-x64"
   },
   "keywords": [
     "arweave",
@@ -35,19 +36,15 @@
   "dependencies": {
     "@ar.io/sdk": "^3.23.0",
     "@ar.io/wayfinder-core": "^1.9.0",
-    "@hono/node-server": "^1.13.7",
-    "better-sqlite3": "^11.7.0",
-    "dotenv": "^17.2.3",
     "hono": "^4.6.0",
     "lru-cache": "^11.0.0",
     "pino": "^9.5.0",
-    "pino-pretty": "^13.0.0",
-    "undici": "^7.16.0"
+    "pino-pretty": "^13.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^9.39.2",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/bun": "^1.2.0",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.50.0",
     "@typescript-eslint/parser": "^8.50.0",
@@ -55,11 +52,10 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "prettier": "^3.7.4",
-    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^4.0.18"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "bun": ">=1.0.0"
   }
 }

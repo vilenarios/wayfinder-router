@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Reward Calculator CLI
  *
@@ -13,6 +13,7 @@
  *   fraud-check <periodId>                          Run fraud detection
  */
 
+import { Database } from "bun:sqlite";
 import {
   createRewardCalculator,
   type TelemetrySource,
@@ -378,11 +379,9 @@ async function runFraudCheck(args: string[]) {
 
 // Telemetry source - reads from SQLite database
 async function createTelemetrySource(): Promise<TelemetrySource> {
-  // Dynamic import to handle optional better-sqlite3
-  let db: any;
+  let db: InstanceType<typeof Database>;
 
   try {
-    const Database = (await import("better-sqlite3")).default;
     db = new Database(TELEMETRY_DB_PATH, { readonly: true });
   } catch {
     console.warn("Could not open telemetry database, using mock data");

@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env bun
 /**
  * Clear Telemetry Database
  *
@@ -6,7 +6,7 @@
  * Use --dry-run to preview what would be deleted.
  *
  * Usage:
- *   npx tsx scripts/clear-telemetry.ts [options]
+ *   bun scripts/clear-telemetry.ts [options]
  *
  * Options:
  *   --dry-run     Preview what would be deleted without making changes
@@ -17,7 +17,7 @@
  */
 
 import { existsSync, unlinkSync, statSync } from "node:fs";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 
 interface Options {
   dryRun: boolean;
@@ -74,7 +74,7 @@ Clear Telemetry Database
 Clears gateway stats and events from the SQLite telemetry database.
 
 Usage:
-  npx tsx scripts/clear-telemetry.ts [options]
+  bun scripts/clear-telemetry.ts [options]
 
 Options:
   --dry-run     Preview what would be deleted without making changes
@@ -84,9 +84,9 @@ Options:
   --help, -h    Show this help message
 
 Examples:
-  npx tsx scripts/clear-telemetry.ts --dry-run
-  npx tsx scripts/clear-telemetry.ts --stats-only
-  npx tsx scripts/clear-telemetry.ts --path ./custom/path/telemetry.db
+  bun scripts/clear-telemetry.ts --dry-run
+  bun scripts/clear-telemetry.ts --stats-only
+  bun scripts/clear-telemetry.ts --path ./custom/path/telemetry.db
 `);
 }
 
@@ -157,7 +157,7 @@ function main(): void {
 
       // Vacuum to reclaim space
       console.log("\nVacuuming database to reclaim space...");
-      db.exec("VACUUM");
+      db.run("VACUUM");
 
       // Get file size after
       db.close();
@@ -169,8 +169,10 @@ function main(): void {
       console.log("\nDone!");
     }
   } finally {
-    if (db.open) {
+    try {
       db.close();
+    } catch {
+      // Already closed
     }
   }
 }

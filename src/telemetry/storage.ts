@@ -5,7 +5,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import type { Logger } from "../types/index.js";
 import type {
   GatewayRequestEvent,
@@ -25,7 +25,7 @@ export interface TelemetryStorageOptions {
 }
 
 export class TelemetryStorage {
-  private db: Database.Database;
+  private db: Database;
   private config: TelemetryConfig;
   private logger: Logger;
   private routerId: string;
@@ -49,7 +49,7 @@ export class TelemetryStorage {
     // Initialize database with error handling
     try {
       this.db = new Database(dbPath);
-      this.db.pragma("journal_mode = WAL");
+      this.db.run("PRAGMA journal_mode = WAL");
       this.initializeSchema();
       this.logger.info("Telemetry storage initialized", { path: dbPath });
     } catch (error) {
@@ -66,7 +66,7 @@ export class TelemetryStorage {
    * Initialize database schema
    */
   private initializeSchema(): void {
-    this.db.exec(`
+    this.db.run(`
       -- Hourly aggregated stats per gateway
       CREATE TABLE IF NOT EXISTS gateway_hourly_stats (
         gateway TEXT NOT NULL,

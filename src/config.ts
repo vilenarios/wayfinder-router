@@ -303,6 +303,14 @@ export function loadConfig(): RouterConfig {
       ),
       adminToken: getEnv("MODERATION_ADMIN_TOKEN", ""),
     },
+
+    // Admin UI settings (runs on separate port, localhost-only by default)
+    admin: {
+      enabled: getEnvBool("ADMIN_UI_ENABLED", true),
+      port: getEnvInt("ADMIN_PORT", 3001),
+      host: getEnv("ADMIN_HOST", "127.0.0.1"),
+      token: getEnv("ADMIN_TOKEN", ""),
+    },
   };
 }
 
@@ -660,6 +668,29 @@ export function validateConfig(config: RouterConfig): void {
       console.warn(
         "Warning: MODERATION_ADMIN_TOKEN is very short. " +
           "Consider using a longer token for better security.",
+      );
+    }
+  }
+
+  // === ADMIN UI VALIDATION ===
+
+  if (config.admin.enabled) {
+    const isLocalhost =
+      config.admin.host === "127.0.0.1" || config.admin.host === "::1";
+
+    // Require ADMIN_TOKEN when binding to non-localhost (exposed to network)
+    if (!isLocalhost && !config.admin.token) {
+      throw new Error(
+        "ADMIN_HOST is set to a non-localhost address but ADMIN_TOKEN is not set. " +
+          "An admin token is required when the admin UI is accessible over the network.",
+      );
+    }
+
+    // Warn if admin port conflicts with public port
+    if (config.admin.port === config.server.port) {
+      throw new Error(
+        `ADMIN_PORT (${config.admin.port}) must be different from PORT (${config.server.port}). ` +
+          "The admin UI runs on a separate port for security.",
       );
     }
   }

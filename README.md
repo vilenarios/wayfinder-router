@@ -18,33 +18,142 @@ A lightweight proxy router for [ar.io](https://ar.io) network gateways with cont
 - **Arweave HTTP API Proxy** — Proxy Arweave node API endpoints (`/info`, `/tx/*`, `/block/*`, `/wallet/*`, etc.)
 - **Telemetry** — SQLite-backed metrics for gateway performance tracking with configurable sampling
 - **Gateway Rewards** — Off-chain incentive system to reward gateways for serving traffic
+- **Admin UI** — Built-in web admin dashboard on a separate port with setup wizard, status monitoring, gateway health, telemetry, moderation, and settings
 - **Content Moderation** — Admin API for blocking ArNS names and transaction IDs
 - **Rate Limiting** — Per-IP rate limiting with configurable windows and thresholds
 - **Graceful Shutdown** — Drain period for in-flight requests before shutdown, with configurable timeouts
 - **Gateway Ping Service** — Background latency probing for temperature-based routing
+- **Standalone Binaries** — Cross-compile to a single executable for Linux, macOS, and Windows
 
 ## Requirements
 
-- Node.js >= 20.0.0
+- [Bun](https://bun.sh) >= 1.0.0
 
 ## Quick Start
 
+### Option 1: Standalone Binary (easiest)
+
+Download the latest binary for your platform from [GitHub Releases](../../releases):
+
+| Platform | Binary |
+|----------|--------|
+| Linux x64 | `wayfinder-router-linux-x64` |
+| Linux ARM64 | `wayfinder-router-linux-arm64` |
+| macOS Intel | `wayfinder-router-darwin-x64` |
+| macOS Apple Silicon | `wayfinder-router-darwin-arm64` |
+| Windows x64 | `wayfinder-router-windows-x64.exe` |
+
+Then run it:
+
+```bash
+# Make executable (Linux/macOS)
+chmod +x wayfinder-router-linux-x64
+
+# Run — the admin UI opens at http://localhost:3001 with a setup wizard
+./wayfinder-router-linux-x64
+```
+
+The setup wizard at `http://localhost:3001` will guide you through configuration. No `.env` file needed to start.
+
+Or build binaries from source:
+
+```bash
+bun install
+bun run build:binaries   # outputs to ./builds/
+```
+
+### Option 2: Run from Source
+
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Copy example environment file and configure
 cp .env.example .env
 
 # Start development server with hot reload
-npm run dev
+bun run dev
 
-# Or build and run production
-npm run build
-npm start
+# Or run production directly (Bun runs TypeScript natively)
+bun run start
 ```
 
-The server starts at `http://localhost:3000` by default.
+The server starts at `http://localhost:3000` by default. The admin UI is available at `http://localhost:3001`.
+
+### Option 3: Docker
+
+```bash
+# Build and run with docker compose
+docker compose up wayfinder-router
+
+# Or build and run manually
+docker build -t wayfinder-router .
+docker run -p 3000:3000 -p 3001:3001 --env-file .env -v ./data:/app/data wayfinder-router
+```
+
+## Admin UI
+
+Wayfinder Router includes a built-in web admin dashboard that runs on a **separate port** from the public router (port 3001 by default). This ensures admin endpoints are never exposed to public traffic.
+
+```
+http://localhost:3001
+```
+
+### Pages
+
+- **Status** — Live dashboard showing uptime, operating mode, verification status, gateway health bar, cache utilization, and ping service stats
+- **Gateways** — Sortable table of all ar.io network gateways with health, temperature score, latency, success rate, and traffic stats
+- **Telemetry** — Time-ranged metrics (1h/6h/24h/7d) with request totals, success rates, bytes served, and per-gateway performance table with CSV export
+- **Moderation** — Block/unblock ArNS names and transaction IDs, view blocklist, or enable moderation if not yet configured
+- **Settings** — View all current configuration grouped by category (server, mode, routing, verification, cache, telemetry, rate limiting, HTTP, shutdown)
+
+### Setup Wizard
+
+On first run (when `BASE_DOMAIN=localhost`), the admin UI shows a guided setup wizard:
+
+1. **Domain** — Configure your base domain, port, and optional root host content
+2. **Routing** — Choose operating mode (proxy/route), routing strategy, and gateway source
+3. **Verification** — Enable content verification, choose trust source, set gateway count and consensus threshold
+
+The wizard generates a `.env` configuration file that can be copied to clipboard or saved directly.
+
+### Security Model
+
+| | Public Port (3000) | Admin Port (3001) |
+|---|---|---|
+| **Default bind** | `0.0.0.0` (all interfaces) | `127.0.0.1` (localhost only) |
+| **Admin UI** | Not available (404) | Full access |
+| **Content serving** | Normal operation | N/A |
+
+- Admin is **never** exposed on the public port
+- Default localhost binding means only local access (use SSH tunnel for remote)
+- Set `ADMIN_HOST=0.0.0.0` to expose over network — this **requires** `ADMIN_TOKEN` to be set
+- `ADMIN_PORT` must differ from `PORT` (validated at startup)
+
+### Admin Configuration
+
+| Variable          | Default     | Description                                                    |
+| ----------------- | ----------- | -------------------------------------------------------------- |
+| `ADMIN_UI_ENABLED`| `true`      | Enable admin UI server                                         |
+| `ADMIN_PORT`      | `3001`      | Admin server port (separate from public)                       |
+| `ADMIN_HOST`      | `127.0.0.1` | Admin bind address (`127.0.0.1` = localhost only)              |
+| `ADMIN_TOKEN`     | _(empty)_   | Bearer token for auth (required when `ADMIN_HOST` is not localhost) |
+
+### Remote Access
+
+To access the admin UI from a remote machine while keeping it secure:
+
+```bash
+# Option 1: SSH tunnel (recommended)
+ssh -L 3001:localhost:3001 your-server
+
+# Then open http://localhost:3001 in your browser
+
+# Option 2: Expose with token auth
+ADMIN_HOST=0.0.0.0
+ADMIN_TOKEN=your-secure-token-here
+# The UI will prompt for the token on load
+```
 
 ## Usage
 
@@ -332,12 +441,24 @@ Moderation endpoints (when `MODERATION_ENABLED=true`):
 | `POST /wayfinder/moderation/reload`               | Yes  | Reload blocklist from disk  |
 | `DELETE /wayfinder/moderation/block/:type/:value` | Yes  | Unblock content             |
 
-Other endpoints:
+Other endpoints (public port):
 
 | Endpoint                                                        | Description                                  |
 | --------------------------------------------------------------- | -------------------------------------------- |
 | `ALL /graphql`                                                  | GraphQL proxy (requires `GRAPHQL_PROXY_URL`) |
 | `/info`, `/tx/*`, `/block/*`, `/wallet/*`, `/price/*`, `/peers` | Arweave API (requires `ARWEAVE_API_ENABLED`) |
+
+Admin UI endpoints (admin port, default 3001):
+
+| Endpoint               | Description                          |
+| ---------------------- | ------------------------------------ |
+| `GET /`                | Admin UI SPA                         |
+| `GET /api/status`      | Aggregated status data               |
+| `GET /api/gateways`    | Gateway list with health and scores  |
+| `GET /api/telemetry`   | Time-ranged telemetry stats          |
+| `GET /api/config`      | Current configuration (sanitized)    |
+| `GET /api/moderation`  | Moderation status and blocklist      |
+| `POST /api/config/save`| Save .env file                       |
 
 When `ROOT_HOST_CONTENT` is not set, the root endpoint (`/`) displays router info.
 
@@ -360,29 +481,29 @@ Verification gateways receive a 15% bonus. Rewards are split between operators a
 
 ```bash
 # Calculate yesterday's rewards
-npm run rewards:calculate
+bun run rewards:calculate
 
 # Calculate for a specific date
-npm run rewards calculate -- --date 2026-01-25
+bun run rewards calculate -- --date 2026-01-25
 
 # List all reward periods
-npm run rewards:list
+bun run rewards:list
 
 # Preview distribution (see operator/delegate splits)
-npm run rewards preview <periodId>
+bun run rewards preview <periodId>
 
 # Run fraud detection
-npm run rewards fraud-check <periodId>
+bun run rewards fraud-check <periodId>
 
 # Approve for distribution (after review)
-npm run rewards approve <periodId>
+bun run rewards approve <periodId>
 
 # Reject a period
-npm run rewards reject <periodId> -- --reason "reason text"
+bun run rewards reject <periodId> -- --reason "reason text"
 
 # Execute distribution (dry-run first!)
-npm run rewards distribute <periodId> -- --dry-run
-npm run rewards distribute <periodId>
+bun run rewards distribute <periodId> -- --dry-run
+bun run rewards distribute <periodId>
 ```
 
 ### Reward Configuration
@@ -421,22 +542,26 @@ docker compose --profile dev up wayfinder-router-dev
 
 ```bash
 # Core
-npm run dev          # Start with hot reload (tsx watch)
-npm run build        # Compile TypeScript
-npm run typecheck    # Type check without emitting
-npm run test         # Run tests
-npm run test:watch   # Run tests in watch mode
+bun run dev          # Start with hot reload (bun --watch)
+bun run start        # Run production (bun src/index.ts)
+bun run typecheck    # Type check without emitting
+bun run test         # Run tests
+bun run test:watch   # Run tests in watch mode
+
+# Build
+bun run build            # Compile TypeScript (tsc)
+bun run build:binaries   # Cross-compile standalone binaries for all platforms
 
 # Code quality
-npm run lint         # Run ESLint
-npm run lint:fix     # Auto-fix ESLint issues
-npm run format       # Format with Prettier
-npm run format:check # Check formatting
+bun run lint         # Run ESLint
+bun run lint:fix     # Auto-fix ESLint issues
+bun run format       # Format with Prettier
+bun run format:check # Check formatting
 
 # Utilities
-npm run stats        # Show gateway telemetry statistics
-npm run clear:telemetry  # Clear telemetry database
-npm run clear:all    # Clear all data (telemetry + cache)
+bun run stats            # Show gateway telemetry statistics
+bun run clear:telemetry  # Clear telemetry database
+bun run clear:all        # Clear all data (telemetry + cache)
 ```
 
 ## Documentation

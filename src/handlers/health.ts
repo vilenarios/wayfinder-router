@@ -14,6 +14,7 @@ export interface HealthHandlerDeps {
   config: RouterConfig;
   logger: Logger;
   startTime: number;
+  version: string;
 }
 
 /**
@@ -29,7 +30,7 @@ export function createHealthHandler(deps: HealthHandlerDeps) {
         ms: uptimeMs,
         human: formatUptime(uptimeMs),
       },
-      version: process.env.npm_package_version || "0.1.0",
+      version: deps.version,
     });
   };
 }

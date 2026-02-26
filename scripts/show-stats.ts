@@ -1,11 +1,11 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env bun
 /**
  * Show Telemetry Stats
  *
  * Displays summary of telemetry data stored in the SQLite database.
  *
  * Usage:
- *   npx tsx scripts/show-stats.ts [options]
+ *   bun scripts/show-stats.ts [options]
  *
  * Options:
  *   --path <path> Override TELEMETRY_DB_PATH (default: ./data/telemetry.db)
@@ -14,7 +14,7 @@
  */
 
 import { existsSync, statSync } from "node:fs";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 
 interface Options {
   dbPath: string;
@@ -61,7 +61,7 @@ Show Telemetry Stats
 Displays summary of telemetry data stored in the SQLite database.
 
 Usage:
-  npx tsx scripts/show-stats.ts [options]
+  bun scripts/show-stats.ts [options]
 
 Options:
   --path <path> Override TELEMETRY_DB_PATH (default: ./data/telemetry.db)
@@ -69,9 +69,9 @@ Options:
   --help, -h    Show this help message
 
 Examples:
-  npx tsx scripts/show-stats.ts
-  npx tsx scripts/show-stats.ts --json
-  npx tsx scripts/show-stats.ts --path ./custom/path/telemetry.db
+  bun scripts/show-stats.ts
+  bun scripts/show-stats.ts --json
+  bun scripts/show-stats.ts --path ./custom/path/telemetry.db
 `);
 }
 

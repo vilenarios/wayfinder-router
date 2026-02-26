@@ -8,10 +8,11 @@ import { RequestTracker } from "./request-tracker.js";
 
 /**
  * Server interface that can be closed
- * Compatible with both http.Server and @hono/node-server's ServerType
+ * Compatible with Bun.serve() (stop) and Node http.Server (close)
  */
 interface CloseableServer {
-  close(callback?: (err?: Error) => void): void;
+  stop?(): void;
+  close?(callback?: (err?: Error) => void): void;
 }
 
 export interface ShutdownManagerOptions {
@@ -154,21 +155,33 @@ export class ShutdownManager {
 
   /**
    * Close the HTTP server.
+   * Supports both Bun.serve() (stop) and Node http.Server (close).
    */
   private closeServer(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.server.close((err) => {
-        if (err) {
-          this.logger.error("Error closing server", {
-            error: err.message,
-          });
-          reject(err);
-        } else {
-          this.logger.info("Server closed");
-          resolve();
-        }
+    if (this.server.stop) {
+      this.server.stop();
+      this.logger.info("Server closed");
+      return Promise.resolve();
+    }
+
+    if (this.server.close) {
+      return new Promise((resolve, reject) => {
+        this.server.close!((err) => {
+          if (err) {
+            this.logger.error("Error closing server", {
+              error: err.message,
+            });
+            reject(err);
+          } else {
+            this.logger.info("Server closed");
+            resolve();
+          }
+        });
       });
-    });
+    }
+
+    this.logger.warn("Server has no stop or close method");
+    return Promise.resolve();
   }
 
   /**

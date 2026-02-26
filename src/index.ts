@@ -3,12 +3,11 @@
  * Entry point for the lightweight ar.io gateway proxy
  */
 
-import "dotenv/config";
-import { serve } from "@hono/node-server";
 import pino from "pino";
 
 import { loadConfig, validateConfig } from "./config.js";
 import { createServer } from "./server.js";
+import { createAdminServer } from "./admin/server.js";
 import type { Logger, RouterConfig } from "./types/index.js";
 import { createShutdownManager } from "./utils/shutdown-manager.js";
 
@@ -168,7 +167,7 @@ async function main() {
   });
 
   // Create server
-  const { app, services } = createServer({ config, logger });
+  const { app, services, startTime } = createServer({ config, logger });
 
   // Initialize network gateway manager if using network/top-staked sources
   if (services.networkGatewayManager) {
@@ -185,7 +184,7 @@ async function main() {
   // Start server first - don't block on ping service
   // The temperature cache works fine without ping data (uses default scores)
   // and will improve as ping data populates in the background
-  const server = serve({
+  const server = Bun.serve({
     fetch: app.fetch,
     port: config.server.port,
     hostname: config.server.host,
@@ -194,6 +193,27 @@ async function main() {
   logger.info("Wayfinder Router started", {
     url: `http://${config.server.host}:${config.server.port}`,
   });
+
+  // Start admin UI server on separate port (localhost-only by default)
+  let adminServer: ReturnType<typeof Bun.serve> | null = null;
+  if (config.admin.enabled) {
+    const { app: adminApp } = createAdminServer({
+      config,
+      logger,
+      services,
+      startTime,
+    });
+
+    adminServer = Bun.serve({
+      fetch: adminApp.fetch,
+      port: config.admin.port,
+      hostname: config.admin.host,
+    });
+
+    logger.info("Admin UI started", {
+      url: `http://${config.admin.host}:${config.admin.port}`,
+    });
+  }
 
   // Initialize ping service in background (non-blocking)
   // The initial ping round will run while the server is already accepting requests
@@ -214,6 +234,12 @@ async function main() {
     drainTimeoutMs: config.shutdown.drainTimeoutMs,
     shutdownTimeoutMs: config.shutdown.shutdownTimeoutMs,
     onBeforeServerClose: async () => {
+      // Stop admin server
+      if (adminServer) {
+        logger.info("Stopping admin UI server");
+        adminServer.stop();
+      }
+
       // Stop ping service first (it depends on network manager)
       if (services.pingService) {
         logger.info("Stopping gateway ping service");
