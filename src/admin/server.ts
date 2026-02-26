@@ -49,13 +49,10 @@ export function createAdminServer(options: AdminServerOptions) {
     version: ROUTER_VERSION,
     startTime: options.startTime,
     gatewaySelector: services.gatewaySelector,
-    arnsResolver: services.arnsResolver,
-    contentFetcher: services.contentFetcher,
     telemetryService: services.telemetryService,
     contentCache: services.contentCache,
     pingService: services.pingService,
     blocklistService: services.blocklistService,
-    networkGatewayManager: services.networkGatewayManager,
     wayfinderServices: services.wayfinderServices,
   });
 

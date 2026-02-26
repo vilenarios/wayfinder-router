@@ -180,6 +180,66 @@ export function createAdminRoutes(deps: AdminDeps): Hono {
     });
   });
 
+  // Telemetry export - CSV download
+  admin.get("/api/telemetry/export", (c: Context) => {
+    if (!deps.telemetryService) {
+      return c.json({ error: "Telemetry not enabled" }, 400);
+    }
+
+    const format = c.req.query("format") || "csv";
+    const range = getTimeRange((c.req.query("range") as string) || "24h");
+    const data = deps.telemetryService.exportRewardData(
+      range.startHour,
+      range.endHour,
+    );
+
+    if (format === "json") {
+      return c.json(data);
+    }
+
+    // CSV format
+    const headers = [
+      "gateway",
+      "total_requests",
+      "successful_requests",
+      "bytes_served",
+      "success_rate",
+      "verification_success_rate",
+      "avg_latency_ms",
+      "availability_rate",
+    ];
+    const csvEscape = (val: string | number): string => {
+      const s = String(val);
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    };
+
+    const rows = data.gateways.map((gw) =>
+      [
+        csvEscape(gw.gateway),
+        gw.totalRequests,
+        gw.successfulRequests,
+        gw.bytesServed,
+        gw.successRate.toFixed(4),
+        gw.verificationSuccessRate.toFixed(4),
+        gw.avgLatencyMs.toFixed(1),
+        gw.availabilityRate.toFixed(4),
+      ].join(","),
+    );
+
+    const csv = [headers.join(","), ...rows].join("\n");
+    const filename = `telemetry-${range.startHour.slice(0, 10)}.csv`;
+
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  });
+
   // Config API - sanitized config (no tokens)
   admin.get("/api/config", (c: Context) => {
     const cfg = deps.config;
@@ -190,25 +250,42 @@ export function createAdminRoutes(deps: AdminDeps): Hono {
         baseDomain: cfg.server.baseDomain,
         rootHostContent: cfg.server.rootHostContent,
         restrictToRootHost: cfg.server.restrictToRootHost,
-        graphqlProxyUrl: cfg.server.graphqlProxyUrl || null,
+        graphqlProxyUrl: cfg.server.graphqlProxyUrl || "",
       },
       mode: cfg.mode,
       routing: {
         strategy: cfg.routing.strategy,
         gatewaySource: cfg.routing.gatewaySource,
+        trustedPeerGateway: cfg.routing.trustedPeerGateway.origin,
+        staticGateways: cfg.routing.staticGateways.map((u) => u.origin),
+        trustedArioGateways: cfg.routing.trustedArioGateways.map(
+          (u) => u.origin,
+        ),
         retryAttempts: cfg.routing.retryAttempts,
+        retryDelayMs: cfg.routing.retryDelayMs,
+        temperatureWindowMs: cfg.routing.temperatureWindowMs,
+        temperatureMaxSamples: cfg.routing.temperatureMaxSamples,
       },
       verification: {
         enabled: cfg.verification.enabled,
         gatewaySource: cfg.verification.gatewaySource,
         gatewayCount: cfg.verification.gatewayCount,
+        staticGateways: cfg.verification.staticGateways.map((u) => u.origin),
         consensusThreshold: cfg.verification.consensusThreshold,
         retryAttempts: cfg.verification.retryAttempts,
+      },
+      networkGateways: {
+        refreshIntervalMs: cfg.networkGateways.refreshIntervalMs,
+        minGateways: cfg.networkGateways.minGateways,
+        fallbackGateways: cfg.networkGateways.fallbackGateways.map(
+          (u) => u.origin,
+        ),
       },
       cache: {
         contentEnabled: cfg.cache.contentEnabled,
         contentMaxSizeBytes: cfg.cache.contentMaxSizeBytes,
-        contentPath: cfg.cache.contentPath || null,
+        contentMaxItemSizeBytes: cfg.cache.contentMaxItemSizeBytes,
+        contentPath: cfg.cache.contentPath || "",
         arnsTtlMs: cfg.cache.arnsTtlMs,
       },
       telemetry: {
@@ -218,12 +295,33 @@ export function createAdminRoutes(deps: AdminDeps): Hono {
         sampling: cfg.telemetry.sampling,
       },
       rateLimit: cfg.rateLimit,
+      ping: cfg.ping,
+      resilience: cfg.resilience,
+      errorHandling: cfg.errorHandling,
+      shutdown: cfg.shutdown,
       http: {
         connectionsPerHost: cfg.http.connectionsPerHost,
         connectTimeoutMs: cfg.http.connectTimeoutMs,
         requestTimeoutMs: cfg.http.requestTimeoutMs,
+        keepAliveTimeoutMs: cfg.http.keepAliveTimeoutMs,
       },
-      shutdown: cfg.shutdown,
+      logging: cfg.logging,
+      arweaveApi: {
+        enabled: cfg.arweaveApi.enabled,
+        readNodes: cfg.arweaveApi.readNodes.map((u) => u.origin),
+        writeNodes: cfg.arweaveApi.writeNodes.map((u) => u.origin),
+        retryAttempts: cfg.arweaveApi.retryAttempts,
+        timeoutMs: cfg.arweaveApi.timeoutMs,
+      },
+      moderation: {
+        enabled: cfg.moderation.enabled,
+        blocklistPath: cfg.moderation.blocklistPath,
+      },
+      admin: {
+        enabled: cfg.admin.enabled,
+        port: cfg.admin.port,
+        host: cfg.admin.host,
+      },
     });
   });
 
@@ -244,7 +342,12 @@ export function createAdminRoutes(deps: AdminDeps): Hono {
       return c.json({ error: "Moderation not enabled" }, 400);
     }
 
-    const body = await c.req.json();
+    let body;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
     const { type, value, reason } = body;
 
     if (!type || !value) {
@@ -266,7 +369,12 @@ export function createAdminRoutes(deps: AdminDeps): Hono {
       return c.json({ error: "Moderation not enabled" }, 400);
     }
 
-    const body = await c.req.json();
+    let body;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
     const { type, value } = body;
 
     if (!type || !value) {
@@ -277,18 +385,123 @@ export function createAdminRoutes(deps: AdminDeps): Hono {
     return c.json({ ok: true, removed });
   });
 
-  // Save .env file
+  // Save .env file — supports merge mode { changes: {} } and legacy { env: "" }
   admin.post("/api/config/save", async (c: Context) => {
-    const body = await c.req.json();
-    const envContent = body.env;
+    let body;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
 
+    const fs = await import("fs");
+    const path = await import("path");
+    const envPath = path.resolve(process.cwd(), ".env");
+
+    // Merge mode: { changes: { KEY: "value", ... } }
+    if (body.changes && typeof body.changes === "object") {
+      const changeKeys = Object.keys(body.changes);
+      if (changeKeys.length > 100) {
+        return c.json({ error: "Too many changes (max 100)" }, 400);
+      }
+      const totalSize = changeKeys.reduce(
+        (sum, k) => sum + k.length + String(body.changes[k]).length,
+        0,
+      );
+      if (totalSize > 64 * 1024) {
+        return c.json({ error: "Payload too large (max 64KB)" }, 413);
+      }
+      try {
+        const changes: Record<string, string> = body.changes;
+
+        // Read existing .env content
+        let existingContent = "";
+        try {
+          existingContent = fs.readFileSync(envPath, "utf-8");
+        } catch {
+          // File doesn't exist yet, start fresh
+        }
+
+        const lines = existingContent.split("\n");
+        const updatedKeys = new Set<string>();
+        const newLines: string[] = [];
+
+        // Update existing lines
+        for (const line of lines) {
+          const trimmed = line.trim();
+          // Preserve comments and blank lines
+          if (trimmed === "" || trimmed.startsWith("#")) {
+            newLines.push(line);
+            continue;
+          }
+
+          // Match KEY=value pattern
+          const eqIndex = trimmed.indexOf("=");
+          if (eqIndex > 0) {
+            const key = trimmed.substring(0, eqIndex).trim();
+            if (key in changes) {
+              // Preserve existing quoting convention
+              const existingVal = trimmed.substring(eqIndex + 1);
+              const isDoubleQuoted =
+                existingVal.startsWith('"') && existingVal.endsWith('"');
+              const isSingleQuoted =
+                existingVal.startsWith("'") && existingVal.endsWith("'");
+              const newVal = changes[key];
+              if (isDoubleQuoted) {
+                newLines.push(`${key}="${newVal}"`);
+              } else if (isSingleQuoted) {
+                newLines.push(`${key}='${newVal}'`);
+              } else {
+                newLines.push(`${key}=${newVal}`);
+              }
+              updatedKeys.add(key);
+              continue;
+            }
+          }
+          newLines.push(line);
+        }
+
+        // Append new keys that weren't in existing file
+        for (const [key, value] of Object.entries(changes)) {
+          if (!updatedKeys.has(key)) {
+            newLines.push(`${key}=${value}`);
+          }
+        }
+
+        // Ensure file ends with newline
+        let result = newLines.join("\n");
+        if (!result.endsWith("\n")) {
+          result += "\n";
+        }
+
+        fs.writeFileSync(envPath, result, "utf-8");
+        deps.logger.info("Admin UI: .env file saved (merge mode)", {
+          keysChanged: Object.keys(changes).length,
+        });
+        return c.json({ ok: true });
+      } catch (err) {
+        deps.logger.error("Admin UI: Failed to save .env (merge mode)", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return c.json({ error: "Failed to write .env file" }, 500);
+      }
+    }
+
+    // Legacy mode: { env: "raw string" }
+    const envContent = body.env;
     if (typeof envContent !== "string") {
-      return c.json({ error: "env string required" }, 400);
+      return c.json(
+        { error: "Either 'changes' object or 'env' string required" },
+        400,
+      );
+    }
+
+    if (envContent.length > 64 * 1024) {
+      return c.json({ error: "Payload too large (max 64KB)" }, 413);
     }
 
     try {
-      const fs = await import("fs");
-      fs.writeFileSync(".env", envContent, "utf-8");
+      fs.writeFileSync(envPath, envContent, "utf-8");
       deps.logger.info("Admin UI: .env file saved");
       return c.json({ ok: true });
     } catch (err) {
