@@ -10,33 +10,8 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            os: ubuntu-latest
-            bun-target: bun-linux-x64
-            artifact: wayfinder-router-linux-x64
-          - target: linux-arm64
-            os: ubuntu-latest
-            bun-target: bun-linux-arm64
-            artifact: wayfinder-router-linux-arm64
-          - target: darwin-x64
-            os: macos-13
-            bun-target: bun-darwin-x64
-            artifact: wayfinder-router-darwin-x64
-          - target: darwin-arm64
-            os: macos-14
-            bun-target: bun-darwin-arm64
-            artifact: wayfinder-router-darwin-arm64
-          - target: windows-x64
-            os: ubuntu-latest
-            bun-target: bun-windows-x64
-            artifact: wayfinder-router-windows-x64.exe
-
+    name: Build binaries
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -50,16 +25,20 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Build binary
+      - name: Build all binaries
         run: |
           mkdir -p builds
-          bun build --compile --target=${{ matrix.bun-target }} src/index.ts --outfile ./builds/${{ matrix.artifact }}
+          bun build --compile --target=bun-linux-x64 src/index.ts --outfile ./builds/wayfinder-router-linux-x64
+          bun build --compile --target=bun-linux-arm64 src/index.ts --outfile ./builds/wayfinder-router-linux-arm64
+          bun build --compile --target=bun-darwin-x64 src/index.ts --outfile ./builds/wayfinder-router-darwin-x64
+          bun build --compile --target=bun-darwin-arm64 src/index.ts --outfile ./builds/wayfinder-router-darwin-arm64
+          bun build --compile --target=bun-windows-x64 src/index.ts --outfile ./builds/wayfinder-router-windows-x64.exe
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: builds/${{ matrix.artifact }}
+          name: binaries
+          path: builds/
 
   test:
     name: Test
@@ -90,22 +69,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: builds
-          merge-multiple: false
+          name: binaries
+          path: release
 
       - name: Prepare release assets
         run: |
-          mkdir -p release
-          # Each artifact is in its own directory
-          for dir in builds/*/; do
-            cp "$dir"* release/ 2>/dev/null || true
-          done
-          # Make binaries executable
           chmod +x release/wayfinder-router-linux-* release/wayfinder-router-darwin-* 2>/dev/null || true
-          # Create checksums
           cd release && sha256sum * > checksums.txt
           cat checksums.txt
 
