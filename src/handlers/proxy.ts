@@ -591,7 +591,12 @@ export function createProxyHandler(deps: ProxyHandlerDeps) {
       // No sandbox subdomain - redirect to sandboxed URL
       const sandbox = sandboxFromTxId(txId);
       const protocol = c.req.url.startsWith("https") ? "https" : "http";
-      const redirectUrl = `${protocol}://${sandbox}.${config.server.baseDomain}/${txId}${path}`;
+      const url = new URL(c.req.url);
+      const portSuffix =
+        url.port && url.port !== "80" && url.port !== "443"
+          ? `:${url.port}`
+          : "";
+      const redirectUrl = `${protocol}://${sandbox}.${config.server.baseDomain}${portSuffix}/${txId}${path}`;
 
       logger.info("Redirecting to sandbox subdomain", {
         txId,
